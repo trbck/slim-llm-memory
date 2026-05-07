@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "slim-llm-memory"
+version = "0.1.0"
+description = "Slim, fast, persistent memory + retrieval for LLM apps. numpy + httpx, ~1000 LOC, drops into anything."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "trbck"}]
+keywords = ["llm", "embeddings", "vector", "memory", "rag", "ollama"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+]
+dependencies = [
+    "numpy>=1.24",
+    "httpx>=0.25",
+]
+
+[project.optional-dependencies]
+gemini = ["google-genai>=1.0"]
+graph = ["networkx>=3.0"]
+anthropic = ["anthropic>=0.40"]
+test = ["pytest>=7", "pytest-asyncio>=0.23"]
+dev = ["slim-llm-memory[test,gemini,graph,anthropic]", "ruff>=0.6"]
+
+[project.urls]
+Homepage = "https://github.com/trbck/slim-llm-memory"
+Documentation = "https://github.com/trbck/slim-llm-memory/blob/main/docs/IMPLEMENTATION.md"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["slim_llm_memory*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+addopts = "-q --strict-markers"
