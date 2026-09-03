@@ -73,6 +73,7 @@ Public API surface (the only thing callers see):
 Memory(path, embedder)
   .upsert(items)              → {added, updated, skipped, embed_calls}
   .search(query, k, kinds, min_score)  → [Hit, ...]
+  .neighbours(id, k, kinds)   → [Hit, ...]  (no embed call)
   .find_duplicates(threshold) → [[id, ...], ...]
   .update_text(id, text)      → bool
   .remove(id)                 → bool

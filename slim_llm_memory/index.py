@@ -179,6 +179,36 @@ class Memory:
             self.obs.count("remove")
         return ok
 
+    # ─── ranking ──────────────────────────────────────────────────────────
+    def _rank(self, qv: np.ndarray, k: int, kinds: set[str] | None,
+              min_score: float, exclude: str | None = None) -> list[Hit]:
+        """Top-k over the store by dot product with the unit vector ``qv``."""
+        scores = self.store.vectors @ qv  # shape (N,)
+        mask = np.ones(scores.shape[0], dtype=bool)
+        for i, it in enumerate(self.store.items):
+            if it.deleted or it.id == exclude:
+                mask[i] = False
+            elif kinds is not None and (it.meta.get("kind") not in kinds):
+                mask[i] = False
+        if min_score > 0:
+            mask &= scores >= min_score
+        valid = np.where(mask)[0]
+        if valid.size == 0:
+            return []
+        kk = min(k, valid.size)
+        candidate_scores = scores[valid]
+        if kk < valid.size:
+            top_idx = np.argpartition(-candidate_scores, kk - 1)[:kk]
+        else:
+            top_idx = np.arange(valid.size)
+        top_idx = top_idx[np.argsort(-candidate_scores[top_idx])]
+        chosen = valid[top_idx]
+        hits: list[Hit] = []
+        for i in chosen:
+            it = self.store.items[int(i)]
+            hits.append(Hit(id=it.id, score=float(scores[i]), text=it.text, meta=dict(it.meta)))
+        return hits
+
     # ─── search ───────────────────────────────────────────────────────────
     def search(
         self,
@@ -209,48 +239,21 @@ class Memory:
         if not qv_raw:
             return []
         qv = _normalise(np.asarray(qv_raw[0], dtype=np.float32))
-
-        # All store vectors are pre-normalised → dot product == cosine.
-        scores = self.store.vectors @ qv  # shape (N,)
-
-        # Build mask for tombstones + kind filter.
-        mask = np.ones(scores.shape[0], dtype=bool)
-        for i, it in enumerate(self.store.items):
-            if it.deleted:
-                mask[i] = False
-            elif kinds is not None and (it.meta.get("kind") not in kinds):
-                mask[i] = False
-
-        if min_score > 0:
-            mask &= scores >= min_score
-
-        valid = np.where(mask)[0]
-        if valid.size == 0:
-            return []
-
-        # argpartition for top-k, then sort the small slice.
-        kk = min(k, valid.size)
-        candidate_scores = scores[valid]
-        if kk < valid.size:
-            top_idx = np.argpartition(-candidate_scores, kk - 1)[:kk]
-        else:
-            top_idx = np.arange(valid.size)
-        top_idx = top_idx[np.argsort(-candidate_scores[top_idx])]
-        chosen = valid[top_idx]
-
-        hits: list[Hit] = []
-        for i in chosen:
-            it = self.store.items[int(i)]
-            hits.append(Hit(
-                id=it.id,
-                score=float(scores[i]),
-                text=it.text,
-                meta=dict(it.meta),
-            ))
-
+        hits = self._rank(qv, k, kinds, min_score)
         duration_ms = (time.time() - t0) * 1000
         self.obs.record_slow("search", duration_ms)
         self.obs.count("search.calls")
+        return hits
+
+    def neighbours(self, item_id: str, k: int = 10, kinds: set[str] | None = None) -> list[Hit]:
+        """Nearest stored items to an existing item. No embedder call — one GEMV."""
+        idx = self.store._id_to_idx.get(item_id)
+        if idx is None or k < 1:
+            return []
+        t0 = time.time()
+        hits = self._rank(self.store.vectors[idx], k, kinds, min_score=0.0, exclude=item_id)
+        self.obs.record_slow("neighbours", (time.time() - t0) * 1000)
+        self.obs.count("neighbours.calls")
         return hits
 
     # ─── duplicates ───────────────────────────────────────────────────────

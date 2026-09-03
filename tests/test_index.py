@@ -170,3 +170,22 @@ def test_find_duplicates_threshold_one_matches_identical(mem: Memory):
     clusters = mem.find_duplicates(threshold=1.0)
     assert sorted(clusters[0]) == ["a", "b"]
     assert len(clusters) == 1
+
+
+def test_neighbours_uses_stored_vector_without_embedding(mem: Memory):
+    mem.upsert([
+        {"id": "a", "text": "nginx tls setup", "meta": {"kind": "note"}},
+        {"id": "b", "text": "nginx tls setup", "meta": {"kind": "note"}},   # identical → cosine 1
+        {"id": "c", "text": "milch kaufen", "meta": {"kind": "shopping"}},
+    ])
+    calls_before = mem.stats()["counters"].get("embed.calls", 0)
+    hits = mem.neighbours("a", k=5)
+    assert [h.id for h in hits][0] == "b"
+    assert all(h.id != "a" for h in hits)
+    assert mem.stats()["counters"].get("embed.calls", 0) == calls_before
+    # kinds filter applies
+    assert [h.id for h in mem.neighbours("a", k=5, kinds={"shopping"})] == ["c"]
+    # unknown id → empty
+    assert mem.neighbours("nope") == []
+    mem.remove("b")
+    assert all(h.id != "b" for h in mem.neighbours("a", k=5))
