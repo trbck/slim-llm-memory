@@ -158,7 +158,10 @@ within 0.05 of the best centroid are kept, and a prompt that matches no
 topic falls back to the exact scan. `examples/03_routing_bench.py` has the
 numbers: at 500 topics × 200 chunks, routing cuts the scan from ~40 ms to ~2 ms.
 
-`notebooks/library_demo.ipynb` walks through it.
+`notebooks/library_demo.ipynb` walks through it. `notebooks/use_cases_demo.ipynb`
+measures four real use cases (grounded answers, paraphrase, languages, agent
+session memory) and ends with an honest table of what is missing compared to a
+full RAG stack, an ontology, and a vector database.
 
 `notebooks/topic_context_demo.ipynb` (executed, 14 cells) and
 `examples/02_topic_context.py` are the proof: this repo's docs as the
