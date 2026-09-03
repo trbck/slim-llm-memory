@@ -21,7 +21,7 @@
 - Tests: zero network, `Embedder.noop()` only. Full suite must stay under 10 s.
 - Python env for running tests/notebooks: `/home/trbck/miniconda3/envs/trading/bin/python` (has pytest, jupyter, mcp 2.1.1, watchdog 6.0.0, pyyaml 6.0.3).
 - Deviation from spec, locked in here: spool lines are **per file**, not per chunk (`{"op":"file","path":...,"chunks":[...]}` and `{"op":"remove","path":...}`), because the brain must delete stale chunk ids when a file shrinks from 5 H2 sections to 3, and deletion events carry no chunk count. `parse_file_deleted` is therefore not needed. Hash is computed by `Memory`, not carried in the spool.
-- Commit after every task with the trailer:
+- Commit after every task.
   ```
   Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
   Claude-Session: https://claude.ai/code/session_01Bfp1r95yrUXn93gKURKeU2
@@ -242,8 +242,6 @@ git commit -m "fix: release lock on failed load, amortised vector append, thresh
 
 Found by notebooks/verify_memory.ipynb (committed here).
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01Bfp1r95yrUXn93gKURKeU2"
 ```
 
 ---
@@ -357,8 +355,6 @@ Expected: 48 passed.
 git add slim_llm_memory/index.py tests/test_index.py README.md
 git commit -m "feat: Memory.neighbours — nearest items to a stored id without an embed call
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01Bfp1r95yrUXn93gKURKeU2"
 ```
 
 ---
@@ -612,8 +608,6 @@ Expected: 4 passed.
 git add pyproject.toml slim_llm_memory/apps tests/obsidian
 git commit -m "feat(obsidian): package scaffold, [obsidian] extra, config loading
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01Bfp1r95yrUXn93gKURKeU2"
 ```
 
 ---
@@ -806,8 +800,6 @@ Expected: 8 passed.
 git add slim_llm_memory/apps/obsidian/chunker.py tests/obsidian/test_chunker.py
 git commit -m "feat(obsidian): adaptive chunker (whole → H2 → sliding window)
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01Bfp1r95yrUXn93gKURKeU2"
 ```
 
 ---
@@ -1232,8 +1224,6 @@ Expected: 9 passed. If `test_h1_title_and_links_resolved` link order differs, th
 git add slim_llm_memory/apps/obsidian/parser.py tests/obsidian
 git commit -m "feat(obsidian): markdown parser with frontmatter, tags, wikilinks, fixture vault
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01Bfp1r95yrUXn93gKURKeU2"
 ```
 
 ---
@@ -1440,8 +1430,6 @@ Expected: 4 passed.
 git add slim_llm_memory/apps/obsidian/spool.py tests/obsidian/test_spool.py
 git commit -m "feat(obsidian): JSONL spool with atomic write, done-rename, sweep
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01Bfp1r95yrUXn93gKURKeU2"
 ```
 
 ---
@@ -1998,8 +1986,6 @@ Expected: 13 passed. If `test_drain_upserts_and_marks_done` reports `upserted ==
 git add slim_llm_memory/apps/obsidian/brain.py slim_llm_memory/apps/obsidian/__init__.py tests/obsidian/conftest.py tests/obsidian/test_brain.py
 git commit -m "feat(obsidian): Brain core — spool drain, flush policy, six operations
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01Bfp1r95yrUXn93gKURKeU2"
 ```
 
 ---
@@ -2335,8 +2321,6 @@ Expected: 7 passed. `test_run_watch_end_to_end` depends on inotify timing; if it
 git add slim_llm_memory/apps/obsidian/ingest.py slim_llm_memory/apps/obsidian/watcher.py tests/obsidian/test_ingest.py tests/obsidian/test_watcher.py
 git commit -m "feat(obsidian): full sweep + watchdog watcher with per-path debounce
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01Bfp1r95yrUXn93gKURKeU2"
 ```
 
 ---
@@ -2563,8 +2547,6 @@ Expected: 4 passed. If `_payload` fails to decode, print `result` once, adapt `_
 git add slim_llm_memory/apps/obsidian/mcp_server.py tests/obsidian/test_mcp_server.py
 git commit -m "feat(obsidian): MCP stdio server with seven tools and background spool drain
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01Bfp1r95yrUXn93gKURKeU2"
 ```
 
 ---
@@ -2770,8 +2752,6 @@ Expected: all passed (≈ 48 core + ≈ 45 obsidian), under 10 s. `logging.basic
 git add slim_llm_memory/apps/obsidian/cli.py tests/obsidian/test_cli.py
 git commit -m "feat(obsidian): slim-llm-obsidian CLI (ingest|mcp|stats) with file+stderr logging
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01Bfp1r95yrUXn93gKURKeU2"
 ```
 
 ---
@@ -2882,8 +2862,6 @@ Expected: all passed.
 git add tests/obsidian/test_integration.py README.md docs/specs/2026-05-20-obsidian-brain-design.md docs/IMPLEMENTATION.md
 git commit -m "docs(obsidian): README quickstart, spec status, end-to-end integration test
 
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01Bfp1r95yrUXn93gKURKeU2"
 ```
 
 ---
