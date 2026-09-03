@@ -159,3 +159,14 @@ def test_invalid_upsert_inputs(mem: Memory):
         mem.upsert([{"id": "", "text": "x"}])
     with pytest.raises(ValueError):
         mem.upsert([{"id": "x"}])  # no text
+
+
+def test_find_duplicates_threshold_one_matches_identical(mem: Memory):
+    mem.upsert([
+        {"id": "a", "text": "identical text", "meta": {}},
+        {"id": "b", "text": "identical text", "meta": {}},
+        {"id": "c", "text": "something else", "meta": {}},
+    ])
+    clusters = mem.find_duplicates(threshold=1.0)
+    assert sorted(clusters[0]) == ["a", "b"]
+    assert len(clusters) == 1

@@ -203,3 +203,35 @@ def test_stats_shape(tmp_path: Path):
         assert st["dirty"] is False
         assert st["version"] == 1
         assert isinstance(st["file_age_seconds"], int)
+
+
+# ─── lock released when load fails ───────────────────────────────────────
+
+def test_lock_released_when_load_fails(tmp_path: Path):
+    with _make_store(tmp_path, name="model-A", dim=8) as s:
+        s.add_item(Item(id="a", text="x", hash="h"), _vec(1))
+        s.flush()
+    with pytest.raises(StoreError, match="embedder mismatch"):
+        Store(tmp_path, embedder_name="model-B", embedder_dim=8)
+    # The failed constructor must not keep the directory locked.
+    with _make_store(tmp_path, name="model-A", dim=8) as s:
+        assert [it.id for it in s.items] == ["a"]
+
+
+# ─── amortised append ─────────────────────────────────────────────────────
+
+def test_append_uses_amortised_buffer(tmp_path: Path):
+    # Mechanism test (timing is flaky at dim 8): vectors must be a view onto a
+    # geometrically grown capacity buffer, and in-place updates write through.
+    with _make_store(tmp_path) as s:
+        for i in range(100):
+            s.add_item(Item(id=str(i), text="t", hash="h"), _vec(i))
+        assert s.vectors.shape == (100, 8)
+        assert s._buf.shape[0] >= 100 and np.shares_memory(s.vectors, s._buf)
+        s.add_item(Item(id="5", text="u", hash="h2"), _vec(999))
+        assert np.allclose(s._buf[5], _vec(999))
+        s.flush()
+    with _make_store(tmp_path) as s:
+        assert s.vectors.shape == (100, 8)
+        assert np.allclose(s.vectors[5], _vec(999))
+        assert np.allclose(s.vectors[7], _vec(7))

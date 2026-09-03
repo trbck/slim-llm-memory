@@ -264,6 +264,10 @@ class Memory:
         if not 0.0 < threshold <= 1.0:
             raise ValueError("threshold must be in (0, 1]")
 
+        # float32 dot of identical unit vectors lands at 0.99999988, so a
+        # literal 1.0 would never match. Tolerate float32 rounding.
+        eff_threshold = min(threshold, 1.0 - 1e-6)
+
         open_idx = list(self.store.open_indices())
         n = len(open_idx)
         if n < 2:
@@ -293,7 +297,7 @@ class Memory:
                 row_global = start + r
                 # Only inspect upper triangle (col > row).
                 row = block[r]
-                cols = np.where(row >= threshold)[0]
+                cols = np.where(row >= eff_threshold)[0]
                 for c in cols:
                     if c > row_global:
                         union(row_global, int(c))

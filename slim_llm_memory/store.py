@@ -137,12 +137,17 @@ class Store:
         self._lock.acquire()
 
         self.items: list[Item] = []
-        self.vectors: np.ndarray = np.zeros((0, self.embedder_dim), dtype=np.float32)
+        self._buf: np.ndarray = np.zeros((0, self.embedder_dim), dtype=np.float32)
+        self.vectors: np.ndarray = self._buf[:0]
         self._id_to_idx: dict[str, int] = {}
         self._version: int = 0
         self._dirty: bool = False
 
-        self._load_or_init()
+        try:
+            self._load_or_init()
+        except BaseException:
+            self._lock.release()
+            raise
 
     # ─── lifecycle ────────────────────────────────────────────────────────
     def close(self) -> None:
@@ -235,8 +240,13 @@ class Store:
             )
 
         self.items = loaded_items
-        self.vectors = vectors
+        self._set_vectors(vectors)
         self._id_to_idx = {it.id: i for i, it in enumerate(loaded_items) if not it.deleted}
+
+    def _set_vectors(self, vectors: np.ndarray) -> None:
+        """Adopt ``vectors`` as the backing buffer; ``self.vectors`` is a view of the live rows."""
+        self._buf = np.ascontiguousarray(vectors, dtype=np.float32)
+        self.vectors = self._buf[: self._buf.shape[0]]
 
     # ─── mutation (in-memory) ─────────────────────────────────────────────
     def add_item(self, item: Item, vector: np.ndarray) -> None:
@@ -250,9 +260,15 @@ class Store:
             self.items[existing_idx] = item
             self.vectors[existing_idx] = vector
         else:
-            # Append
+            n = self.vectors.shape[0]
+            if n == self._buf.shape[0]:
+                new_cap = max(16, self._buf.shape[0] * 2)
+                grown = np.empty((new_cap, self.embedder_dim), dtype=np.float32)
+                grown[:n] = self._buf[:n]
+                self._buf = grown
+            self._buf[n] = vector
+            self.vectors = self._buf[: n + 1]
             self.items.append(item)
-            self.vectors = np.vstack([self.vectors, vector[None, :]]) if self.vectors.size else vector[None, :].astype(np.float32)
             self._id_to_idx[item.id] = len(self.items) - 1
         self._dirty = True
 
@@ -293,14 +309,14 @@ class Store:
 
         # Compaction: drop tombstones if past threshold.
         if self.needs_compaction():
-            keep = [(i, it) for i, it in enumerate(self.items) if not it.deleted]
-            new_items = [it for _, it in keep]
+            keep_idx = [i for i, it in enumerate(self.items) if not it.deleted]
+            new_items = [self.items[i] for i in keep_idx]
             new_vectors = (
-                np.vstack([self.vectors[i:i+1] for i, _ in keep])
-                if keep else np.zeros((0, self.embedder_dim), dtype=np.float32)
+                self.vectors[keep_idx]
+                if keep_idx else np.zeros((0, self.embedder_dim), dtype=np.float32)
             )
             self.items = new_items
-            self.vectors = new_vectors
+            self._set_vectors(new_vectors)
             self._id_to_idx = {it.id: i for i, it in enumerate(new_items)}
 
         new_v = self._version + 1
