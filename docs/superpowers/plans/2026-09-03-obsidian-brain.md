@@ -1014,6 +1014,32 @@ def test_non_utf8_is_skipped(vault: Path):
 
 def test_parse_text_empty_body_yields_no_chunks(vault: Path):
     assert parse_text(vault, "Daily/empty.md", "---\ntags: [x]\n---\n\n", 0.0) == []
+
+
+def test_crlf_body_is_normalised(vault: Path):
+    raw = "---\r\ntitle: X\r\n---\r\nline one\r\nline two\r\n"
+    [c] = parse_text(vault, "Daily/crlf.md", raw, 0.0)
+    assert "\r" not in c.text
+    assert c.text == "line one\nline two"
+    assert c.meta["title"] == "X"
+
+
+def test_link_resolution_uses_one_vault_walk(vault: Path, monkeypatch):
+    import pathlib
+    from slim_llm_memory.apps.obsidian import parser as parser_mod
+    parser_mod._stem_index_cache.clear()
+    calls = {"n": 0}
+    original = pathlib.Path.rglob
+
+    def counting_rglob(self, pattern):
+        calls["n"] += 1
+        return original(self, pattern)
+
+    monkeypatch.setattr(pathlib.Path, "rglob", counting_rglob)
+    for _ in range(2):
+        [c] = parse_file(vault, vault / "Daily" / "2026-05-20.md")
+        assert c.meta["links"] == ["People/Alice.md", "Projects/Long note.md"]
+    assert calls["n"] == 1   # one walk builds the index; the second parse hits the cache
 ```
 
 - [ ] **Step 3: Run tests to verify they fail**
@@ -1037,6 +1063,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -1104,18 +1131,38 @@ def _as_str_list(value: Any) -> list[str]:
     return [str(value)]
 
 
+_STEM_INDEX_TTL = 30.0
+_stem_index_cache: dict[Path, tuple[float, dict[str, list[str]]]] = {}
+
+
+def _stem_index(vault_root: Path) -> dict[str, list[str]]:
+    """{file stem: [vault-relative paths]} for every vault note; one rglob, cached 30 s.
+
+    Without this, every unresolved wikilink would walk the whole vault (O(links × files)
+    on a full sweep). Links to notes created within the TTL stay unresolved until the
+    file is next parsed — acceptable for watch mode."""
+    root = vault_root.resolve()
+    now = time.monotonic()
+    cached = _stem_index_cache.get(root)
+    if cached and now - cached[0] < _STEM_INDEX_TTL:
+        return cached[1]
+    index: dict[str, list[str]] = {}
+    for p in root.rglob("*.md"):
+        if is_vault_markdown(root, p):
+            index.setdefault(p.stem, []).append(rel_path(root, p))
+    _stem_index_cache[root] = (now, index)
+    return index
+
+
 def _resolve_link(vault_root: Path, target: str) -> str:
-    """``[[People/Alice]]`` → ``People/Alice.md`` if that file exists; else search
-    the vault for ``<stem>.md``; else the raw target."""
+    """``[[People/Alice]]`` → ``People/Alice.md`` if that file exists; else look up
+    ``<stem>.md`` in the cached vault index; else the raw target."""
     target = target.strip()
     direct = vault_root / f"{target}.md"
     if direct.is_file():
         return rel_path(vault_root, direct)
-    stem = Path(target).name
-    for cand in vault_root.rglob(f"{stem}.md"):
-        if is_vault_markdown(vault_root, cand):
-            return rel_path(vault_root, cand)
-    return target
+    cands = _stem_index(vault_root).get(Path(target).name)
+    return sorted(cands)[0] if cands else target
 
 
 def _dedupe(seq: list[str]) -> list[str]:
@@ -1131,6 +1178,7 @@ def _dedupe(seq: list[str]) -> list[str]:
 # ─── main entry points ────────────────────────────────────────────────────
 
 def parse_text(vault_root: Path, rel: str, raw: str, mtime: float) -> list[Chunk]:
+    raw = raw.replace("\r\n", "\n").replace("\r", "\n")   # CRLF files must not leak \r into chunks
     fm, body = _split_frontmatter(raw)
     body = body.strip("\n")
     if not body.strip():
