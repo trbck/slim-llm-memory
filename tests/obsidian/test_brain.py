@@ -34,7 +34,8 @@ def test_drain_removes_stale_chunks_when_file_shrinks(brain: Brain):
     r = brain.drain()
     assert r["upserted"] == 1 and r["removed"] == 4
     assert brain.stats()["items_open"] == 1
-    assert brain.search("short now", k=5)[0]["id"] == "Projects/Long note.md#0"
+    # Embedder.noop is hash-based, not semantic — only an exact text match scores ~1.0.
+    assert brain.search("# Long literature note\n\nshort now", k=5, min_score=0.0)[0]["id"] == "Projects/Long note.md#0"
 
 
 def test_drain_remove_op(brain: Brain):
@@ -100,7 +101,8 @@ def test_search_shape_and_filters(brain: Brain):
     for rel in ["People/Alice.md", "Daily/2026-05-20.md", "Projects/Long note.md"]:
         spool_file(brain, rel)
     brain.drain()
-    hits = brain.search("Works on infra. Knows nginx.", k=3, min_score=0.0)
+    # Embedder.noop is hash-based, not semantic — only an exact text match scores ~1.0.
+    hits = brain.search("# Alice\n\nWorks on infra. Knows nginx. #person", k=3, min_score=0.0)
     h = hits[0]
     assert set(h) == {"id", "score", "path", "title", "kind", "tags", "heading_path", "text"}
     assert h["path"] == "People/Alice.md" and h["title"] == "Alice Example"
