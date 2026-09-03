@@ -695,9 +695,13 @@ def test_oversized_h2_section_falls_back_to_window():
 
 
 def test_h3_does_not_split():
-    text = "## A\n" + words(300) + "\n### sub\n" + words(300)
+    # Both H2 sections stay under max_tokens so the H2 path is taken; the H3
+    # must not create a third slice.
+    text = "## A\n" + words(300, "a") + "\n### sub\n" + words(100, "s") + "\n## B\n" + words(300, "b")
     out = chunk(text, max_tokens=500)
-    assert len(out) == 1 and out[0].heading == "A"
+    assert [s.heading for s in out] == ["A", "B"]
+    assert [s.section_idx for s in out] == [1, 2]
+    assert "### sub" in out[0].text and "s99" in out[0].text
 
 
 def test_window_preserves_original_whitespace():
