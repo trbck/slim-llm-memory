@@ -189,3 +189,5 @@ def test_neighbours_uses_stored_vector_without_embedding(mem: Memory):
     assert mem.neighbours("nope") == []
     mem.remove("b")
     assert all(h.id != "b" for h in mem.neighbours("a", k=5))
+    mem.remove("a")
+    assert mem.neighbours("a", k=5) == []
