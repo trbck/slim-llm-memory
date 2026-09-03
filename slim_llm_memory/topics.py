@@ -25,6 +25,7 @@ from typing import Any, Iterable, Mapping
 
 from .embed import Embedder
 from .index import Hit, Memory
+from .store import StoreError
 
 _PARA_SPLIT = re.compile(r"\n\s*\n")
 _SLUG = re.compile(r"[^a-z0-9._-]+")
@@ -167,10 +168,16 @@ class Topic:
         self.chunk_words = int(chunk_words)
         self.ollama_url = ollama_url.rstrip("/")
         self.memory = Memory(self.path, _make_embedder(embedder, self.ollama_url))
+        self.closed = False
 
     # ─── lifecycle ────────────────────────────────────────────────────────
     def close(self) -> None:
+        """Save and release the store's lock. The object is not reusable afterwards."""
+        if self.closed:
+            return
         self.memory.close()
+        self.closed = True
+        _OPEN.pop(self.path.resolve(), None)
 
     def __enter__(self) -> "Topic":
         return self
@@ -294,8 +301,30 @@ class Topic:
         return resp.json()["message"]["content"].strip()
 
 
+_OPEN: dict[Path, Topic] = {}
+
+
 def topic(name: str, *, path: "str | Path | None" = None,
           embedder: "str | Embedder" = "ollama:nomic-embed-text",
           ollama_url: str = DEFAULT_OLLAMA, chunk_words: int = 120) -> Topic:
-    """Open (or create) the store for ``name``. See :class:`Topic`."""
-    return Topic(name, path=path, embedder=embedder, ollama_url=ollama_url, chunk_words=chunk_words)
+    """Open (or create) the store for ``name``. See :class:`Topic`.
+
+    Calling this twice for the same store in one process (re-running a
+    notebook cell, say) returns the object that is already open instead of
+    fighting over the directory lock. ``close()`` releases it.
+    """
+    key = (Path(path) if path else DEFAULT_HOME.expanduser() / _slug(name)).expanduser().resolve()
+    existing = _OPEN.get(key)
+    if existing is not None and not existing.closed:
+        return existing
+    try:
+        t = Topic(name, path=key, embedder=embedder, ollama_url=ollama_url, chunk_words=chunk_words)
+    except StoreError as exc:
+        if "lock" in str(exc):
+            raise StoreError(
+                f"{exc}\nThe store is open in another process (another notebook or script?). "
+                f"Close it there, or open this topic with a different path=."
+            ) from exc
+        raise
+    _OPEN[key] = t
+    return t

@@ -156,3 +156,22 @@ def test_answer_calls_ollama_chat_with_context(t: Topic, monkeypatch):
     assert captured["url"] == "http://localhost:11434/api/chat"
     assert captured["json"]["model"] == "m"
     assert "para two about tls" in captured["json"]["messages"][1]["content"]
+
+
+def test_topic_reopen_in_same_process_returns_open_object(tmp_path: Path):
+    a = topic("r", path=tmp_path / "r", embedder="noop:64")
+    b = topic("r", path=tmp_path / "r", embedder="noop:64")     # re-running a notebook cell
+    assert b is a and not a.closed
+    a.close()
+    assert a.closed
+    a.close()                                                    # idempotent
+    c = topic("r", path=tmp_path / "r", embedder="noop:64")     # after close → a fresh object
+    assert c is not a and not c.closed
+    c.close()
+
+
+def test_topic_open_elsewhere_gives_a_hint(tmp_path: Path):
+    from slim_llm_memory.store import StoreError
+    with Topic("x", path=tmp_path / "x", embedder="noop:64"):   # direct Topic() bypasses the registry
+        with pytest.raises(StoreError, match="another process"):
+            topic("x", path=tmp_path / "x", embedder="noop:64")
