@@ -17,3 +17,4 @@ htmlcov/
 .ipynb_checkpoints/
 .topic_store/
 .topic_store_nb/
+.library_nb/

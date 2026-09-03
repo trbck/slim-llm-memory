@@ -135,6 +135,23 @@ t.answer("how do I enable TLS?")            # + a local Ollama chat model, groun
 `t.add` is incremental (unchanged chunks are never re-embedded), `t.forget(name)`
 drops a doc, `embedder="noop"` runs offline for tests.
 
+Several topics make a database. `library()` is a folder of topic stores;
+`ask` embeds once and scans every topic, archiving is a folder move:
+
+```python
+from slim_llm_memory import library
+
+db = library()                              # ~/.slim-llm-memory/topics
+db.topic("nginx").add("docs/nginx/")
+db.topic("cooking").add({"pasta.md": "..."})
+db                                          # table of topics
+db.ask("how do I enable TLS?")              # hits labelled by topic, merged by score
+db.ask("...", topics=["nginx"])
+db.archive("cooking"); db.restore("cooking"); db.delete("cooking")
+```
+
+`notebooks/library_demo.ipynb` walks through it.
+
 `notebooks/topic_context_demo.ipynb` (executed, 14 cells) and
 `examples/02_topic_context.py` are the proof: this repo's docs as the
 topic, live prompts with the latency split into embed vs scan, an

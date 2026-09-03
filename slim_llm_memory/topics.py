@@ -117,7 +117,10 @@ class Result:
             words = h.text.split()
             body = " ".join(words[:budget]) if len(words) > budget else h.text
             budget -= len(words)
-            lines.append(f"[{n}] ({h.meta.get('doc')}, score {h.score:.2f})\n{body}")
+            where = h.meta.get("doc")
+            if h.meta.get("topic"):
+                where = f"{h.meta['topic']}/{where}"
+            lines.append(f"[{n}] ({where}, score {h.score:.2f})\n{body}")
         return "\n\n".join(lines)
 
     def __iter__(self):
