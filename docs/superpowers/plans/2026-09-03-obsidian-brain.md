@@ -1538,7 +1538,8 @@ def test_drain_removes_stale_chunks_when_file_shrinks(brain: Brain):
     r = brain.drain()
     assert r["upserted"] == 1 and r["removed"] == 4
     assert brain.stats()["items_open"] == 1
-    assert brain.search("short now", k=5)[0]["id"] == "Projects/Long note.md#0"
+    # Embedder.noop is hash-based: query with the exact chunk text, and min_score=0 (default 0.3 would drop it).
+    assert brain.search("# Long literature note\n\nshort now", k=5, min_score=0.0)[0]["id"] == "Projects/Long note.md#0"
 
 
 def test_drain_remove_op(brain: Brain):
@@ -1604,7 +1605,8 @@ def test_search_shape_and_filters(brain: Brain):
     for rel in ["People/Alice.md", "Daily/2026-05-20.md", "Projects/Long note.md"]:
         spool_file(brain, rel)
     brain.drain()
-    hits = brain.search("Works on infra. Knows nginx.", k=3, min_score=0.0)
+    # Embedder.noop is hash-based: only the exact chunk text scores ~1.0.
+    hits = brain.search("# Alice\n\nWorks on infra. Knows nginx. #person", k=3, min_score=0.0)
     h = hits[0]
     assert set(h) == {"id", "score", "path", "title", "kind", "tags", "heading_path", "text"}
     assert h["path"] == "People/Alice.md" and h["title"] == "Alice Example"
@@ -2389,7 +2391,8 @@ async def test_search_and_get_via_call_tool(brain: Brain):
     sweep(brain.vault, brain.spool)
     brain.drain()
     server = build_server(brain)
-    hits = _payload(await server.call_tool("search", {"query": "Works on infra. Knows nginx.", "k": 2, "min_score": 0.0}))
+    # Embedder.noop is hash-based: only the exact chunk text scores ~1.0.
+    hits = _payload(await server.call_tool("search", {"query": "# Alice\n\nWorks on infra. Knows nginx. #person", "k": 2, "min_score": 0.0}))
     assert hits[0]["path"] == "People/Alice.md"
     got = _payload(await server.call_tool("get", {"path": "People/Alice.md"}))
     assert got["title"] == "Alice Example"
@@ -2801,8 +2804,9 @@ def test_edit_to_searchable_and_capture_roundtrip(brain: Brain):
     r = brain.drain()
     assert r["files"] == 1 and r["upserted"] >= 6
 
+    # Embedder.noop is hash-based: only the exact chunk text scores ~1.0.
     t0 = time.perf_counter()
-    hits = brain.search("Works on infra. Knows nginx.", k=3, min_score=0.0)
+    hits = brain.search("# Alice\n\nWorks on infra. Knows nginx. #person", k=3, min_score=0.0)
     assert (time.perf_counter() - t0) < 0.2
     assert hits[0]["path"] == "People/Alice.md"
 
