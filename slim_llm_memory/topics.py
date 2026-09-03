@@ -23,6 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+import numpy as np
+
 from .embed import Embedder
 from .index import Hit, Memory
 from .store import StoreError
@@ -96,6 +98,11 @@ class Result:
         self.embed_ms = embed_ms
         self.scan_ms = scan_ms
         self._max_words = max_words
+        # Filled in by Library.ask: which topics were scanned, and what routing cost.
+        self.routed: list[str] | None = None
+        self.routed_of: int = 0
+        self.route_ms: float = 0.0
+        self.per_topic_ms: dict[str, float] = {}
 
     @property
     def ms(self) -> float:
@@ -135,6 +142,8 @@ class Result:
     def __repr__(self) -> str:
         head = (f"ask({self.prompt!r})  {len(self.hits)} hit(s) · "
                 f"embed {self.embed_ms:.0f} ms · scan {self.scan_ms:.2f} ms")
+        if self.routed is not None:
+            head += f" · routed to {len(self.routed)}/{self.routed_of} topics in {self.route_ms:.2f} ms"
         rows = [f"  {n:>2}  {h.score:.2f}  {h.id:<24} {' '.join(h.text.split())[:70]}"
                 for n, h in enumerate(self.hits, start=1)]
         return "\n".join([head, *rows])
@@ -172,6 +181,28 @@ class Topic:
         self.ollama_url = ollama_url.rstrip("/")
         self.memory = Memory(self.path, _make_embedder(embedder, self.ollama_url))
         self.closed = False
+        self._centroid: tuple[tuple, np.ndarray] | None = None
+
+    # ─── routing support ──────────────────────────────────────────────────
+    def _state_key(self) -> tuple:
+        """Changes whenever the store's contents change (add/forget both flush)."""
+        s = self.memory.store
+        return (s._version, len(s.items), s._dirty)
+
+    def centroid(self) -> np.ndarray:
+        """Unit-normalised mean of the topic's live vectors (zeros when empty). Cached per state."""
+        key = self._state_key()
+        if self._centroid is None or self._centroid[0] != key:
+            s = self.memory.store
+            idx = list(s.open_indices())
+            if idx:
+                c = s.vectors[idx].mean(axis=0)
+                n = float(np.linalg.norm(c))
+                c = (c / n if n else c).astype(np.float32)
+            else:
+                c = np.zeros(s.embedder_dim, dtype=np.float32)
+            self._centroid = (key, c)
+        return self._centroid[1]
 
     # ─── lifecycle ────────────────────────────────────────────────────────
     def close(self) -> None:

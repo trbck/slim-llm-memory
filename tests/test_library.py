@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from slim_llm_memory import library
-from slim_llm_memory.library import ARCHIVE_DIR, Library, TopicInfo
+from slim_llm_memory.libraries import ARCHIVE_DIR, Library, TopicInfo
 from slim_llm_memory.topics import Topic
 
 
@@ -64,12 +64,12 @@ def test_ask_fans_out_and_merges_by_score(db: Library):
     r = db.ask("boil pasta", k=3, min_score=0.0)
     assert r.top.id == "Cooking at home/pasta.md#0"
     assert r.top.meta["topic"] == "Cooking at home" and r.top.meta["doc"] == "pasta.md"
-    assert set(r.per_topic_ms) == {"nginx", "Cooking at home"}
+    assert r.routed is None and r.per_topic_ms == {}                 # exact fan-out by default
     assert "[1] (Cooking at home/pasta.md, score 1.00)" in r.context
     assert len(r) == 3 and [h.score for h in r] == sorted((h.score for h in r), reverse=True)
 
     only = db.ask("boil pasta", k=3, min_score=0.0, topics=["nginx"])
-    assert all(h.meta["topic"] == "nginx" for h in only) and set(only.per_topic_ms) == {"nginx"}
+    assert only and all(h.meta["topic"] == "nginx" for h in only)
     with pytest.raises(KeyError):
         db.ask("x", topics=["nope"])
 
@@ -112,3 +112,81 @@ def test_library_persists_and_reopens(tmp_path: Path):
         assert [i.name for i in db.topics()] == ["Cooking at home"]
         assert [i.name for i in db.topics(archived=True)] == ["nginx"]
         assert db.ask("enable tls with certbot", k=1, min_score=0.0, include_archived=True).top.meta["topic"] == "nginx"
+
+
+# ─── routing ──────────────────────────────────────────────────────────────
+
+def test_centroid_is_unit_mean_and_cached(db: Library):
+    import numpy as np
+    t = db.topic("nginx")
+    assert not t.centroid().any()                                      # empty topic → zeros
+    t.add(NGINX)
+    c = t.centroid()
+    assert abs(np.linalg.norm(c) - 1.0) < 1e-5
+    assert t.centroid() is c                                           # cached while unchanged
+    t.add({"more.md": "reload nginx"})
+    assert t.centroid() is not c                                       # add → recomputed
+
+
+def test_route_ranks_topics_and_chooses_within_margin(db: Library):
+    fill(db)
+    r = db.route("boil pasta")
+    assert [n for n, _ in r.ranked][0] == "Cooking at home"
+    assert r.chosen[0] == "Cooking at home" and len(r.ranked) == 2
+    assert r.embed_ms >= 0 and r.route_ms >= 0 and "route(" in repr(r)
+    assert db.route("boil pasta", m=1).chosen == ["Cooking at home"]
+
+
+def test_route_falls_back_to_everything_when_no_topic_fits(db: Library, monkeypatch):
+    fill(db)
+    monkeypatch.setattr("slim_llm_memory.libraries.ROUTE_MIN_SCORE", 0.99)
+    r = db.route("boil pasta")
+    assert set(r.chosen) == {"nginx", "Cooking at home"}                # weak best → exact fallback
+
+
+def test_ask_exact_is_default_for_small_libraries(db: Library):
+    fill(db)
+    r = db.ask("boil pasta", k=3, min_score=0.0)
+    assert r.routed is None and r.per_topic_ms == {}                  # flat exact path
+    assert r.top.id == "Cooking at home/pasta.md#0"
+    assert "routed" not in repr(r)
+
+
+def test_ask_routed_matches_exact_and_reports_topics(db: Library):
+    fill(db)
+    exact = db.ask("boil pasta", k=2, min_score=0.0, route=False)
+    routed = db.ask("boil pasta", k=2, min_score=0.0, route=True)
+    assert [h.id for h in routed] == [h.id for h in exact]
+    assert routed.routed == ["Cooking at home"] and routed.routed_of == 2
+    assert set(routed.per_topic_ms) == {"Cooking at home"}
+    assert "routed to 1/2 topics" in repr(routed)
+    assert db.ask("boil pasta", k=2, min_score=0.0, route=1).routed == ["Cooking at home"]
+
+
+def test_ask_auto_routes_above_threshold(db: Library, monkeypatch):
+    fill(db)
+    assert db.ask("boil pasta", min_score=0.0).routed is None
+    monkeypatch.setattr("slim_llm_memory.libraries.ROUTE_AUTO_THRESHOLD", 0)
+    assert db.ask("boil pasta", min_score=0.0).routed == ["Cooking at home"]
+
+
+def test_flat_cache_invalidates_on_change(db: Library):
+    fill(db)
+    db.topic("nginx").add({"ops.md": "reload nginx"})
+    assert db.ask("reload nginx", k=1, min_score=0.0).top.id == "nginx/ops.md#0"   # new doc visible
+    db.topic("nginx").forget("ops.md")
+    assert db.ask("reload nginx", k=1, min_score=0.0).top.id != "nginx/ops.md#0"      # gone again
+    db.archive("nginx")
+    assert all(h.meta["topic"] != "nginx" for h in db.ask("reload nginx", k=3, min_score=0.0))
+
+
+def test_flat_and_per_topic_paths_agree_on_scores(db: Library):
+    fill(db)
+    a = db.ask("enable tls with certbot", k=4, min_score=0.0, route=False)
+    qv = db.embedder.embed(["enable tls with certbot"])[0]
+    expected = []
+    for name in ("nginx", "Cooking at home"):
+        t = db.topic(name)
+        expected += [(f"{name}/{h.id}", round(h.score, 5)) for h in t.memory.search_vector(qv, k=4, min_score=0.0)]
+    expected.sort(key=lambda x: -x[1])
+    assert [(h.id, round(h.score, 5)) for h in a] == expected[:4]

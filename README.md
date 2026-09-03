@@ -147,8 +147,16 @@ db.topic("cooking").add({"pasta.md": "..."})
 db                                          # table of topics
 db.ask("how do I enable TLS?")              # hits labelled by topic, merged by score
 db.ask("...", topics=["nginx"])
+db.route("how do I enable TLS?")             # stage 1 alone: topics ranked by centroid similarity
+db.ask("...", route=True)                    # two-stage: route, then scan only the chosen topics
 db.archive("cooking"); db.restore("cooking"); db.delete("cooking")
 ```
+
+`ask` is exact (one concatenated scan) until the library holds more than
+50k chunks, then it routes through topic centroids automatically; topics
+within 0.05 of the best centroid are kept, and a prompt that matches no
+topic falls back to the exact scan. `examples/03_routing_bench.py` has the
+numbers: at 500 topics × 200 chunks, routing cuts the scan from ~40 ms to ~2 ms.
 
 `notebooks/library_demo.ipynb` walks through it.
 

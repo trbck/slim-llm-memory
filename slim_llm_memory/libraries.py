@@ -34,12 +34,35 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+import numpy as np
+
 from .embed import Embedder
-from .index import Hit
+from .index import Hit, _normalise
 from .topics import DEFAULT_HOME, DEFAULT_OLLAMA, Result, Topic, _make_embedder, _slug, topic as _open_topic
 
 ARCHIVE_DIR = "_archive"
 _META = "topic.json"
+
+# Routing defaults — see examples/03_routing_bench.py for the numbers behind them.
+ROUTE_AUTO_THRESHOLD = 50_000   # chunks; below this an exact scan is < ~20 ms, routing buys nothing felt
+ROUTE_MAX_TOPICS = 5            # stage 2 scans at most this many topics
+ROUTE_MARGIN = 0.05             # topics within this of the best centroid score are kept too
+ROUTE_MIN_SCORE = 0.2           # best centroid weaker than this → prompt belongs nowhere → exact fallback
+
+
+@dataclass
+class Route:
+    """What ``Library.route`` returns: every topic ranked by centroid similarity, and the pick."""
+    prompt: str
+    ranked: list[tuple[str, float]]
+    chosen: list[str]
+    embed_ms: float
+    route_ms: float
+
+    def __repr__(self) -> str:
+        head = f"route({self.prompt!r})  → {self.chosen}  · embed {self.embed_ms:.0f} ms · route {self.route_ms:.2f} ms"
+        rows = [f"  {s:.2f}  {n}" for n, s in self.ranked[:10]]
+        return "\n".join([head, *rows])
 
 
 @dataclass
@@ -69,6 +92,7 @@ class Library:
         self.ollama_url = ollama_url
         self.chunk_words = int(chunk_words)
         self._open: dict[str, Topic] = {}          # slug → open Topic (active or archived)
+        self._flat_cache: tuple | None = None     # (key, M, owner, row) for exact fan-out
 
     # ─── paths ────────────────────────────────────────────────────────────
     def _dir(self, slug: str, archived: bool = False) -> Path:
@@ -199,44 +223,148 @@ class Library:
         self._close_slug(slug)
         shutil.rmtree(self._dir(slug, archived))
 
-    # ─── ask ──────────────────────────────────────────────────────────────
-    def ask(self, prompt: str, k: int = 5, *, topics: "Iterable[str] | None" = None,
-            include_archived: bool = False, min_score: float = 0.3, max_words: int = 600) -> Result:
-        """Embed once, scan every selected topic, merge by score.
-
-        Hits come back with ``meta["topic"]`` set and ids prefixed ``topic/``.
-        ``r.per_topic_ms`` holds the scan time of each store.
-        """
+    # ─── candidates ───────────────────────────────────────────────────────
+    def _candidates(self, topics: "Iterable[str] | None", include_archived: bool) -> list[tuple[Topic, bool]]:
         wanted: list[tuple[str, bool]] = []
         if topics is not None:
-            for n in topics:
-                wanted.append(self._find(n))
+            wanted = [self._find(n) for n in topics]
         else:
-            wanted += [(i.slug, False) for i in self.topics()]
+            wanted = [(i.slug, False) for i in self.topics()]
             if include_archived:
                 wanted += [(i.slug, True) for i in self.topics(archived=True)]
+        return [(self._open_dir(slug, archived), archived) for slug, archived in wanted]
 
+    # ─── routing (stage 1: one small centroid array) ──────────────────────
+    def _route_vec(self, qv: np.ndarray, cands: list[tuple[Topic, bool]], m: int, margin: float,
+                   min_score: float) -> tuple[list[tuple[str, float]], list[tuple[Topic, bool]]]:
+        """Rank candidate topics by centroid similarity; choose those within ``margin`` of the
+        best (at most ``m``). If even the best centroid is weak (< ``min_score``) the prompt
+        does not clearly belong anywhere → return every candidate (exact fallback)."""
+        C = np.stack([t.centroid() for t, _ in cands])
+        s = C @ qv
+        order = np.argsort(-s)
+        ranked = [(cands[i][0].name, float(s[i])) for i in order]
+        best = float(s[order[0]])
+        if best < min_score:
+            return ranked, list(cands)
+        chosen = [cands[i] for i in order if s[i] >= best - margin][: max(1, m)]
+        return ranked, chosen
+
+    def route(self, prompt: str, m: "int | None" = None, *, margin: "float | None" = None,
+              min_score: "float | None" = None, include_archived: bool = False) -> Route:
+        """Stage 1 on its own: which topics does this prompt belong to?"""
+        m = ROUTE_MAX_TOPICS if m is None else m                 # resolved at call time (tunable)
+        margin = ROUTE_MARGIN if margin is None else margin
+        min_score = ROUTE_MIN_SCORE if min_score is None else min_score
+        cands = self._candidates(None, include_archived)
+        if not cands:
+            return Route(prompt, [], [], 0.0, 0.0)
         t0 = time.perf_counter()
-        qv = self.embedder.embed([prompt])[0]
+        qv = _normalise(np.asarray(self.embedder.embed([prompt])[0], dtype=np.float32))
         t1 = time.perf_counter()
+        ranked, chosen = self._route_vec(qv, cands, m, margin, min_score)
+        t2 = time.perf_counter()
+        return Route(prompt, ranked, [t.name for t, _ in chosen], (t1 - t0) * 1000, (t2 - t1) * 1000)
 
-        merged: list[Hit] = []
+    # ─── exact fan-out over one concatenated array ────────────────────────
+    def _flat(self, cands: list[tuple[Topic, bool]]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """(M, owner, row): every live vector of every candidate stacked once. Cached until any
+        candidate's store changes. Costs a second in-memory copy of the vectors; built lazily."""
+        key = tuple((t.path, t._state_key()) for t, _ in cands)
+        if self._flat_cache is not None and self._flat_cache[0] == key:
+            return self._flat_cache[1:]
+        mats, owners, rows = [], [], []
+        for ti, (t, _) in enumerate(cands):
+            idx = np.fromiter(t.memory.store.open_indices(), dtype=np.int64)
+            if idx.size:
+                mats.append(t.memory.store.vectors[idx])
+                owners.append(np.full(idx.size, ti, dtype=np.int64))
+                rows.append(idx)
+        if mats:
+            M, owner, row = np.vstack(mats), np.concatenate(owners), np.concatenate(rows)
+        else:
+            M = np.zeros((0, self.embedder.dim), dtype=np.float32)
+            owner = row = np.zeros(0, dtype=np.int64)
+        self._flat_cache = (key, M, owner, row)
+        return M, owner, row
+
+    def _scan_flat(self, qv: np.ndarray, cands: list[tuple[Topic, bool]], k: int, min_score: float) -> list[Hit]:
+        M, owner, row = self._flat(cands)
+        if M.shape[0] == 0:
+            return []
+        s = M @ qv
+        valid = np.where(s >= min_score)[0] if min_score > 0 else np.arange(s.size)
+        if valid.size == 0:
+            return []
+        kk = min(k, valid.size)
+        top = valid[np.argpartition(-s[valid], kk - 1)[:kk]] if kk < valid.size else valid
+        top = top[np.argsort(-s[top])]
+        out: list[Hit] = []
+        for i in top:
+            t, archived = cands[int(owner[i])]
+            it = t.memory.store.items[int(row[i])]
+            out.append(self._label(t, archived, Hit(id=it.id, score=float(s[i]), text=it.text, meta=dict(it.meta))))
+        return out
+
+    @staticmethod
+    def _label(t: Topic, archived: bool, h: Hit) -> Hit:
+        meta = dict(h.meta, topic=t.name)
+        if archived:
+            meta["archived"] = True
+        return Hit(id=f"{t.name}/{h.id}", score=h.score, text=h.text, meta=meta)
+
+    # ─── ask ──────────────────────────────────────────────────────────────
+    def ask(self, prompt: str, k: int = 5, *, topics: "Iterable[str] | None" = None,
+            include_archived: bool = False, min_score: float = 0.3, max_words: int = 600,
+            route: "bool | int | str" = "auto") -> Result:
+        """Embed once, then find the best chunks across topics.
+
+        ``route``:
+          * ``False``  — exact: scan every candidate topic (one concatenated array).
+          * ``True``   — two-stage: centroids pick ≤ ROUTE_MAX_TOPICS topics, scan only those.
+          * an int     — two-stage with that many topics at most.
+          * ``"auto"`` — exact while the library holds ≤ ROUTE_AUTO_THRESHOLD chunks, else two-stage.
+
+        Hits carry ``meta["topic"]`` and ids prefixed ``topic/``. ``r.routed`` lists the topics
+        scanned (``None`` when exact), ``r.per_topic_ms`` the per-store scan time when routed.
+        """
+        cands = self._candidates(topics, include_archived)
+        t0 = time.perf_counter()
+        qv = _normalise(np.asarray(self.embedder.embed([prompt])[0], dtype=np.float32))
+        t1 = time.perf_counter()
+        if not cands:
+            return Result(prompt, [], (t1 - t0) * 1000, 0.0, max_words)
+
+        if route == "auto":
+            total = sum(len(t) for t, _ in cands)
+            use_route, m = (len(cands) > 1 and total > ROUTE_AUTO_THRESHOLD), ROUTE_MAX_TOPICS
+        elif route is False:
+            use_route, m = False, 0
+        else:
+            use_route, m = True, (ROUTE_MAX_TOPICS if route is True else int(route))
+
+        routed = None
+        route_ms = 0.0
         per_topic: dict[str, float] = {}
-        for slug, archived in wanted:
-            t = self._open_dir(slug, archived)
-            s0 = time.perf_counter()
-            hits = t.memory.search_vector(qv, k=k, min_score=min_score)
-            per_topic[t.name] = (time.perf_counter() - s0) * 1000
-            for h in hits:
-                meta = dict(h.meta, topic=t.name)
-                if archived:
-                    meta["archived"] = True
-                merged.append(Hit(id=f"{t.name}/{h.id}", score=h.score, text=h.text, meta=meta))
-        merged.sort(key=lambda h: h.score, reverse=True)
+        if use_route:
+            r0 = time.perf_counter()
+            _, chosen = self._route_vec(qv, cands, m, ROUTE_MARGIN, ROUTE_MIN_SCORE)
+            route_ms = (time.perf_counter() - r0) * 1000
+            routed = [t.name for t, _ in chosen]
+            merged: list[Hit] = []
+            for t, archived in chosen:
+                s0 = time.perf_counter()
+                hits = t.memory.search_vector(qv, k=k, min_score=min_score)
+                per_topic[t.name] = (time.perf_counter() - s0) * 1000
+                merged += [self._label(t, archived, h) for h in hits]
+            merged.sort(key=lambda h: h.score, reverse=True)
+            hits = merged[:k]
+        else:
+            hits = self._scan_flat(qv, cands, k, min_score)
         t2 = time.perf_counter()
 
-        r = Result(prompt, merged[:k], (t1 - t0) * 1000, (t2 - t1) * 1000, max_words)
-        r.per_topic_ms = per_topic
+        r = Result(prompt, hits, (t1 - t0) * 1000, (t2 - t1) * 1000 - route_ms, max_words)
+        r.routed, r.routed_of, r.route_ms, r.per_topic_ms = routed, len(cands), route_ms, per_topic
         return r
 
     # ─── lifecycle ────────────────────────────────────────────────────────
