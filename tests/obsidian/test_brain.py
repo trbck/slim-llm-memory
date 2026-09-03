@@ -1,7 +1,9 @@
+import logging
 import time
 from pathlib import Path
 
 import pytest
+import yaml
 
 from slim_llm_memory import EmbedderError, Embedder, Memory
 from slim_llm_memory.apps.obsidian.brain import Brain, BrainError
@@ -47,6 +49,24 @@ def test_drain_remove_op(brain: Brain):
     # removing an unknown path is a no-op, not an error
     brain.spool.write([remove_entry("nope.md")])
     assert brain.drain()["removed"] == 0
+
+
+def test_drain_skips_poison_entry_and_continues(brain: Brain, caplog):
+    chunks = parse_file(brain.vault, brain.vault / "People/Alice.md")
+    brain.spool.write([
+        {"op": "file", "path": "x.md", "chunks": [{"text": "t", "meta": {}}]},  # missing "id" -> poison
+        file_entry("People/Alice.md", chunks),
+    ])
+    spool_name = brain.spool.pending()[0].name
+    with caplog.at_level(logging.ERROR):
+        r = brain.drain()
+    assert r["upserted"] == 1 and r["files"] == 1 and r["removed"] == 0 and r["embed_failed"] is False
+    assert brain.spool.pending() == []
+    assert brain.stats()["items_open"] == 1
+    assert any(
+        rec.levelno >= logging.ERROR and spool_name in rec.getMessage()
+        for rec in caplog.records
+    )
 
 
 def test_drain_leaves_file_pending_on_embedder_failure(vault: Path, tmp_path: Path):
@@ -170,10 +190,19 @@ def test_remember_writes_inbox_only(brain: Brain):
     txt = p.read_text(encoding="utf-8")
     assert txt.startswith("---\n") and "tags: [claude-session]" in txt and "source: claude" in txt
     assert txt.rstrip().endswith("noteworthy snippet")
-    assert "title: ../../etc/passwd" not in txt
+    fm = yaml.safe_load(txt.split("---\n")[1])
+    assert fm["title"] == "../../etc/passwd"
+    assert fm["tags"] == ["claude-session"]
+    assert fm["source"] == "claude"
     # no title → slug from first words
     r2 = brain.remember("Remember to buy milk tomorrow morning early")
     assert r2["path"].endswith("-remember-to-buy-milk-tomorrow-morning.md")
+    # tags/title with YAML-special characters (comma, bracket, quote, backslash) round-trip safely
+    r3 = brain.remember("x", tags=["a,b", "c]d"], title='q"uote\\back')
+    txt3 = (brain.vault / r3["path"]).read_text(encoding="utf-8")
+    fm3 = yaml.safe_load(txt3.split("---\n")[1])
+    assert fm3["tags"] == ["a,b", "c]d"]
+    assert fm3["title"] == 'q"uote\\back'
     with pytest.raises(BrainError):
         brain.remember("   ")
 

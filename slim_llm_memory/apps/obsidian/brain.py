@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from slim_llm_memory import EmbedderError, Hit, Memory
+from slim_llm_memory import EmbedderError, Memory
 
 from .parser import is_vault_markdown
 from .spool import Spool
@@ -86,13 +86,23 @@ class Brain:
     # ─── drain + flush ────────────────────────────────────────────────────
     def drain(self) -> dict[str, Any]:
         """Apply every pending spool file in order. Stops at the first
-        embedder failure and leaves that file pending for the next tick."""
+        embedder failure and leaves that file pending for the next tick.
+        A structurally-bad individual entry (missing key, bad value) is
+        logged and skipped so it can never permanently block the spool;
+        an unreadable spool file (e.g. vanished mid-drain) is likewise
+        logged and skipped rather than raised."""
         result = {"files": 0, "upserted": 0, "removed": 0, "embed_failed": False}
         with self.lock:
+            stopped = False
             for path in self.spool.pending():
-                entries = self.spool.read(path)
                 try:
-                    for e in entries:
+                    entries = self.spool.read(path)
+                except OSError as exc:
+                    logger.warning("could not read spool file %s, skipping: %s", path.name, exc)
+                    continue
+                embed_failed_here = False
+                for e in entries:
+                    try:
                         if e.get("op") == "file":
                             up, rm = self._apply_file(str(e.get("path")), e.get("chunks") or [])
                         elif e.get("op") == "remove":
@@ -102,15 +112,22 @@ class Brain:
                             continue
                         result["upserted"] += up
                         result["removed"] += rm
-                except EmbedderError as exc:
-                    if not self._embed_failing:
-                        logger.warning("embedder failing, will retry: %s", exc)
-                    self._embed_failing = True
-                    result["embed_failed"] = True
+                    except EmbedderError as exc:
+                        if not self._embed_failing:
+                            logger.warning("embedder failing, will retry: %s", exc)
+                        self._embed_failing = True
+                        result["embed_failed"] = True
+                        embed_failed_here = True
+                        break
+                    except Exception:
+                        logger.exception("skipping bad spool entry in %s: %r", path.name, e)
+                        continue
+                if embed_failed_here:
+                    stopped = True
                     break
                 self.spool.mark_done(path)
                 result["files"] += 1
-            else:
+            if not stopped:
                 if self._embed_failing:
                     logger.info("embedder recovered")
                 self._embed_failing = False
@@ -242,14 +259,19 @@ class Brain:
             if not target.is_relative_to(self.inbox.resolve()):
                 raise BrainError("refusing to write outside vault/inbox")
             clean_tags = [t.strip().lstrip("#") for t in (tags or []) if t and t.strip()]
-            fm = ["---", f"tags: [{', '.join(clean_tags)}]", "source: claude",
-                  f"ts: {ts.strftime('%Y-%m-%dT%H:%M:%SZ')}"]
-            if title and title.strip() and "\n" not in title:
-                safe_title = title.strip().replace('"', "'")
-                if not safe_title.startswith((".", "/")):
-                    fm.append(f'title: "{safe_title}"')
-            fm.append("---")
-            target.write_text("\n".join(fm) + "\n" + text + "\n", encoding="utf-8")
+            fm: dict[str, Any] = {
+                "tags": clean_tags,
+                "source": "claude",
+                "ts": ts.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+            # Filesystem safety comes entirely from the slug regex above — the
+            # frontmatter title is metadata, not a path, so it's written as-is
+            # (properly YAML-escaped) with no path-shaped guard.
+            if title and title.strip():
+                fm["title"] = title.strip()
+            import yaml  # lazy: part of the optional "obsidian" extra, like parser.py.
+            dumped = yaml.safe_dump(fm, sort_keys=False, allow_unicode=True, default_flow_style=None)
+            target.write_text("---\n" + dumped + "---\n" + text + "\n", encoding="utf-8")
             rel = target.relative_to(self.vault).as_posix()
             return {"path": rel, "id": f"{rel}#0", "ingested": False}
 
