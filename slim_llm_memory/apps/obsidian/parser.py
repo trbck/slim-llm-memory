@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -76,6 +77,25 @@ def _as_str_list(value: Any) -> list[str]:
     return [str(value)]
 
 
+_STEM_INDEX_TTL = 30.0
+_stem_index_cache: dict[Path, tuple[float, dict[str, list[str]]]] = {}
+
+
+def _stem_index(vault_root: Path) -> dict[str, list[str]]:
+    """{file stem: [vault-relative paths]} for every vault note; one rglob, cached 30 s."""
+    root = vault_root.resolve()
+    now = time.monotonic()
+    cached = _stem_index_cache.get(root)
+    if cached and now - cached[0] < _STEM_INDEX_TTL:
+        return cached[1]
+    index: dict[str, list[str]] = {}
+    for p in root.rglob("*.md"):
+        if is_vault_markdown(root, p):
+            index.setdefault(p.stem, []).append(rel_path(root, p))
+    _stem_index_cache[root] = (now, index)
+    return index
+
+
 def _resolve_link(vault_root: Path, target: str) -> str:
     """``[[People/Alice]]`` → ``People/Alice.md`` if that file exists; else search
     the vault for ``<stem>.md``; else the raw target."""
@@ -83,10 +103,9 @@ def _resolve_link(vault_root: Path, target: str) -> str:
     direct = vault_root / f"{target}.md"
     if direct.is_file():
         return rel_path(vault_root, direct)
-    stem = Path(target).name
-    for cand in vault_root.rglob(f"{stem}.md"):
-        if is_vault_markdown(vault_root, cand):
-            return rel_path(vault_root, cand)
+    cands = _stem_index(vault_root).get(Path(target).name)
+    if cands:
+        return sorted(cands)[0]
     return target
 
 
@@ -103,6 +122,7 @@ def _dedupe(seq: list[str]) -> list[str]:
 # ─── main entry points ────────────────────────────────────────────────────
 
 def parse_text(vault_root: Path, rel: str, raw: str, mtime: float) -> list[Chunk]:
+    raw = raw.replace("\r\n", "\n").replace("\r", "\n")
     fm, body = _split_frontmatter(raw)
     body = body.strip("\n")
     if not body.strip():

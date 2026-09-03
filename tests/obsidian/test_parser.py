@@ -81,3 +81,32 @@ def test_non_utf8_is_skipped(vault: Path):
 
 def test_parse_text_empty_body_yields_no_chunks(vault: Path):
     assert parse_text(vault, "Daily/empty.md", "---\ntags: [x]\n---\n\n", 0.0) == []
+
+
+def test_crlf_body_is_normalised(vault: Path):
+    raw = "---\r\ntitle: X\r\n---\r\nline one\r\nline two\r\n"
+    [c] = parse_text(vault, "Daily/crlf.md", raw, 0.0)
+    assert "\r" not in c.text
+    assert c.text == "line one\nline two"
+    assert c.meta["title"] == "X"
+
+
+def test_link_resolution_uses_one_vault_walk(vault: Path, monkeypatch):
+    from slim_llm_memory.apps.obsidian import parser as parser_mod
+
+    parser_mod._stem_index_cache.clear()
+
+    calls = {"n": 0}
+    orig_rglob = Path.rglob
+
+    def counting_rglob(self, pattern, *args, **kwargs):
+        calls["n"] += 1
+        return orig_rglob(self, pattern, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "rglob", counting_rglob)
+
+    for _ in range(2):
+        [c] = parse_file(vault, vault / "Daily" / "2026-05-20.md")
+        assert c.meta["links"] == ["People/Alice.md", "Projects/Long note.md"]
+
+    assert calls["n"] == 1
