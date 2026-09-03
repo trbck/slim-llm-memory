@@ -118,25 +118,28 @@ storage backend behind the same `Memory.search()` signature.
 
 ## Topic store: fast context for an LLM working on one topic
 
-`TopicStore` is the "one numpy store per topic" shape: dump the material
-for the topic in, then turn every prompt into a context block with one
-embed call and one numpy scan.
+`topic()` is the "one numpy store per topic" shape with a `requests`-style
+front door: open a store, put text in, get context out.
 
 ```python
-from slim_llm_memory import Embedder
-from slim_llm_memory.topic import TopicStore
+from slim_llm_memory import topic
 
-with TopicStore("./.topics/nginx", Embedder.ollama("nomic-embed-text")) as store:
-    store.add_docs({"setup.md": open("setup.md").read()})   # paragraph-chunked, hash-skipped
-    ctx = store.context_for("how do I enable TLS?", k=4)     # ctx.prompt, ctx.hits, ctx.embed_ms, ctx.scan_ms
-    llm(ctx.prompt + "\n\nQuestion: how do I enable TLS?")
+t = topic("nginx")                          # ~/.slim-llm-memory/topics/nginx, Ollama nomic-embed-text
+t.add("docs/")                              # file, directory, raw text, or {name: text}; saved on return
+r = t.ask("how do I enable TLS?")           # one embed call + one numpy scan
+r                                           # hits with scores, embed ms, scan ms
+r.context                                   # numbered block to prepend to an LLM prompt
+t.answer("how do I enable TLS?")            # + a local Ollama chat model, grounded on r.context
 ```
 
-`examples/02_topic_context.py` is the proof: it indexes this repo's docs as
-the topic, runs live prompts with the latency split into embed vs scan,
-re-indexes after an edit (only the changed chunk is embedded), optionally
-asks a local Ollama model with the retrieved context, and finishes with a
-synthetic scale run. Measured on an 8-core CPU box (Ollama CPU-only):
+`t.add` is incremental (unchanged chunks are never re-embedded), `t.forget(name)`
+drops a doc, `embedder="noop"` runs offline for tests.
+
+`notebooks/topic_context_demo.ipynb` (executed, 14 cells) and
+`examples/02_topic_context.py` are the proof: this repo's docs as the
+topic, live prompts with the latency split into embed vs scan, an
+incremental update, an optional grounded LLM answer, and a synthetic scale
+run. Measured on an 8-core CPU box (Ollama CPU-only):
 
 | Step | Cost | Where the time goes |
 |------|------|---------------------|

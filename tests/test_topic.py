@@ -1,21 +1,20 @@
-"""Tests for TopicStore + Memory.search_vector — offline, noop embedder."""
+"""Tests for the ``topic`` front door + Memory.search_vector — offline, noop embedder."""
 
 from pathlib import Path
 
 import pytest
 
-from slim_llm_memory import Embedder, Memory
-from slim_llm_memory.topic import TopicStore, chunk_paragraphs
+from slim_llm_memory import Embedder, Memory, topic
+from slim_llm_memory.topics import Added, Result, Topic, chunk_paragraphs
 
 
 # ─── chunk_paragraphs ─────────────────────────────────────────────────────
 
 def test_chunk_paragraphs_packs_to_budget():
     paras = [" ".join(f"w{i}" for i in range(50))] * 5      # 5 × 50 words
-    text = "\n\n".join(paras)
-    out = chunk_paragraphs(text, max_words=120)
+    out = chunk_paragraphs("\n\n".join(paras), max_words=120)
     assert [len(c.split()) for c in out] == [100, 100, 50]
-    assert all("\n\n" in c for c in out[:2])                   # paragraphs kept, joined
+    assert all("\n\n" in c for c in out[:2])
 
 
 def test_chunk_paragraphs_glues_short_tail():
@@ -39,69 +38,121 @@ def test_search_vector_matches_search(tmp_path: Path):
         via_txt = mem.search("alpha", k=2, min_score=0.0)
         assert [h.id for h in via_vec] == [h.id for h in via_txt] == ["a", "b"]
         assert abs(via_vec[0].score - 1.0) < 1e-5
-        assert mem.search_vector([0.0] * 64, k=2, min_score=0.01) == []   # zero vector → all scores 0
+        assert mem.search_vector([0.0] * 64, k=2, min_score=0.01) == []
         with pytest.raises(ValueError):
-            mem.search_vector([1.0] * 3, k=2)                     # wrong dim
+            mem.search_vector([1.0] * 3, k=2)
 
 
-# ─── TopicStore ───────────────────────────────────────────────────────────
+# ─── topic() ──────────────────────────────────────────────────────────────
 
 @pytest.fixture
-def store(tmp_path: Path):
-    s = TopicStore(tmp_path / "topic", Embedder.noop(64))
-    yield s
-    s.close()
+def t(tmp_path: Path):
+    tp = topic("Test Topic", path=tmp_path / "store", embedder="noop:64", chunk_words=3)
+    yield tp
+    tp.close()
 
 
-DOCS = {
-    "a.md": "para one about nginx\n\npara two about tls\n\npara three about certbot",
-    "b.md": "milch kaufen\n\nbrot kaufen",
-}
+A_MD = "para one about nginx\n\npara two about tls\n\npara three about certbot"
+B_MD = "milch kaufen\n\nbrot kaufen"
 
 
-def test_add_docs_chunks_and_ids(store: TopicStore):
-    r = store.add_docs(DOCS, max_words=3, min_words=1)
-    assert r["chunks"] == 5 and r["added"] == 5 and r["removed"] == 0
-    ids = {it.id for it in store.memory.store.items}
-    assert ids == {"a.md#0", "a.md#1", "a.md#2", "b.md#0", "b.md#1"}
-    assert store.memory.store.items[0].meta == {"kind": "doc", "doc": "a.md", "idx": 0}
+def test_topic_factory_defaults_and_slug(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr("slim_llm_memory.topics.DEFAULT_HOME", tmp_path / "home")
+    tp = topic("My Topic!", embedder="noop:32")
+    try:
+        assert tp.path == tmp_path / "home" / "my-topic"
+        assert tp.memory.embedder.name == "noop:32"
+        assert len(tp) == 0 and tp.docs() == []
+        assert "my-topic" in repr(tp)
+    finally:
+        tp.close()
+    with pytest.raises(ValueError):
+        topic("!!!", embedder="noop")                 # no path → name must slug to something
+    with pytest.raises(ValueError):
+        topic("x", path=tmp_path / "y", embedder="gemini:foo")
 
 
-def test_add_docs_is_incremental(store: TopicStore):
-    store.add_docs(DOCS, max_words=3, min_words=1)
-    r = store.add_docs(DOCS, max_words=3, min_words=1)
-    assert r["skipped"] == 5 and r["embed_calls"] == 0            # nothing changed → no embed
-    docs = dict(DOCS, **{"a.md": "para one about nginx\n\nchanged"})
-    r = store.add_docs(docs, max_words=3, min_words=1)
-    assert r["skipped"] == 3 and r["updated"] == 1 and r["removed"] == 1  # a#1 re-embedded, a#2 gone
-    assert store.stats()["items_open"] == 4
+def test_add_text_file_dir_and_mapping(t: Topic, tmp_path: Path):
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "a.md").write_text(A_MD, encoding="utf-8")
+    (tmp_path / "docs" / "sub").mkdir()
+    (tmp_path / "docs" / "sub" / "b.txt").write_text(B_MD, encoding="utf-8")
+    (tmp_path / "docs" / "skip.bin").write_bytes(b"\x00")
+
+    r = t.add(tmp_path / "docs")                       # directory → relative names
+    assert isinstance(r, Added) and r and r.docs == 2 and r.chunks == 5 and r.embedded == 5
+    assert t.docs() == ["a.md", "sub/b.txt"]
+
+    r = t.add(str(tmp_path / "docs" / "a.md"), name="again.md")   # file with explicit name
+    assert r.docs == 1 and "again.md" in t
+
+    r = t.add("just a loose sentence")                 # raw text → note-<hash>
+    assert r.chunks == 1 and any(d.startswith("note-") for d in t.docs())
+
+    r = t.add({"c.md": "eins\n\nzwei", "d.md": "drei"})  # mapping
+    assert r.docs == 2 and {"c.md", "d.md"} <= set(t.docs())
+    assert "added 2 doc(s)" in repr(r)
+
+    with pytest.raises(FileNotFoundError):
+        t.add(tmp_path / "nope.md")
+    with pytest.raises(ValueError):
+        t.add("   ")
 
 
-def test_context_for_returns_block_and_timings(store: TopicStore):
-    store.add_docs(DOCS, max_words=3, min_words=1)
-    ctx = store.context_for("para two about tls", k=2, min_score=0.0)
-    assert ctx.hits[0].id == "a.md#1"
-    assert ctx.prompt.startswith("Context (retrieved for this prompt")
-    assert "[1] (a.md, score 1.00)\npara two about tls" in ctx.prompt
-    assert ctx.embed_ms >= 0 and ctx.scan_ms >= 0 and ctx.total_ms == ctx.embed_ms + ctx.scan_ms
+def test_add_is_incremental_and_removes_stale_chunks(t: Topic):
+    t.add({"a.md": A_MD})
+    r = t.add({"a.md": A_MD})
+    assert not r and r.skipped == 3 and r.embedded == 0          # unchanged → no embed
+    r = t.add({"a.md": "para one about nginx\n\nchanged"})
+    assert r.embedded == 1 and r.skipped == 1 and r.removed == 1   # a#1 re-embedded, a#2 gone
+    assert len(t) == 2
+    assert t.forget("a.md") == 2 and len(t) == 0 and t.forget("a.md") == 0
 
 
-def test_context_for_respects_word_budget(store: TopicStore):
-    store.add_docs(DOCS, max_words=3, min_words=1)
-    ctx = store.context_for("para two about tls", k=5, min_score=0.0, max_words=4)
-    assert "[1]" in ctx.prompt and "[2]" not in ctx.prompt          # budget spent after hit 1
+def test_ask_returns_result_with_context_and_timings(t: Topic):
+    t.add({"a.md": A_MD, "b.md": B_MD})
+    r = t.ask("para two about tls", k=2, min_score=0.0)
+    assert isinstance(r, Result) and len(r) == 2 and r
+    assert r.top.id == "a.md#1"
+    assert [h.id for h in r] == [h.id for h in r.hits]
+    assert r.context.startswith("Context (retrieved for this prompt")
+    assert "[1] (a.md, score 1.00)\npara two about tls" in r.context
+    assert r.ms == r.embed_ms + r.scan_ms >= 0
+    assert "2 hit(s)" in repr(r) and "a.md#1" in repr(r)
 
 
-def test_context_for_empty_when_nothing_matches(store: TopicStore):
-    store.add_docs(DOCS, max_words=3, min_words=1)
-    ctx = store.context_for("totally unrelated", k=3, min_score=0.99)
-    assert ctx.hits == [] and ctx.prompt == ""
+def test_ask_word_budget_and_no_hits(t: Topic):
+    t.add({"a.md": A_MD, "b.md": B_MD})
+    r = t.ask("para two about tls", k=5, min_score=0.0, max_words=4)
+    assert "[1]" in r.context and "[2]" not in r.context
+    r = t.ask("unrelated", min_score=0.99)
+    assert not r and r.top is None and r.context == ""
 
 
-def test_store_persists_across_reopen(tmp_path: Path):
-    with TopicStore(tmp_path / "t", Embedder.noop(64)) as s:
-        s.add_docs(DOCS, max_words=3, min_words=1)
-        s.flush()
-    with TopicStore(tmp_path / "t", Embedder.noop(64)) as s:
-        assert s.stats()["items_open"] == 5
-        assert s.context_for("milch kaufen", k=1, min_score=0.0).hits[0].id == "b.md#0"
+def test_topic_persists_across_reopen(tmp_path: Path):
+    with topic("p", path=tmp_path / "p", embedder="noop:64", chunk_words=3) as tp:
+        tp.add({"a.md": A_MD, "b.md": B_MD})          # add() saves; no flush call needed
+    with topic("p", path=tmp_path / "p", embedder="noop:64", chunk_words=3) as tp:
+        assert len(tp) == 5 and tp.docs() == ["a.md", "b.md"]
+        assert tp.ask("milch kaufen", k=1, min_score=0.0).top.id == "b.md#0"
+
+
+def test_answer_calls_ollama_chat_with_context(t: Topic, monkeypatch):
+    t.add({"a.md": A_MD})
+    captured = {}
+
+    class _Resp:
+        def raise_for_status(self): pass
+        def json(self): return {"message": {"content": "  it is [1]  "}}
+
+    def fake_post(url, json=None, timeout=None):
+        captured["url"], captured["json"] = url, json
+        return _Resp()
+
+    import httpx
+    monkeypatch.setattr(httpx, "post", fake_post)
+    out = t.answer("para two about tls", model="m", min_score=0.0)
+    assert out == "it is [1]"
+    assert captured["url"] == "http://localhost:11434/api/chat"
+    assert captured["json"]["model"] == "m"
+    assert "para two about tls" in captured["json"]["messages"][1]["content"]
