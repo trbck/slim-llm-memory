@@ -74,6 +74,7 @@ Memory(path, embedder)
   .upsert(items)              → {added, updated, skipped, embed_calls}
   .search(query, k, kinds, min_score)  → [Hit, ...]
   .neighbours(id, k, kinds)   → [Hit, ...]  (no embed call)
+  .search_vector(vec, k, kinds, min_score) → [Hit, ...]  (pre-embedded query)
   .find_duplicates(threshold) → [[id, ...], ...]
   .update_text(id, text)      → bool
   .remove(id)                 → bool
@@ -114,6 +115,45 @@ At p95 on a CPU with prenormalised float32 vectors:
 
 Phase 1 ships the numpy linear scan. When you outgrow it, swap the
 storage backend behind the same `Memory.search()` signature.
+
+## Topic store: fast context for an LLM working on one topic
+
+`TopicStore` is the "one numpy store per topic" shape: dump the material
+for the topic in, then turn every prompt into a context block with one
+embed call and one numpy scan.
+
+```python
+from slim_llm_memory import Embedder
+from slim_llm_memory.topic import TopicStore
+
+with TopicStore("./.topics/nginx", Embedder.ollama("nomic-embed-text")) as store:
+    store.add_docs({"setup.md": open("setup.md").read()})   # paragraph-chunked, hash-skipped
+    ctx = store.context_for("how do I enable TLS?", k=4)     # ctx.prompt, ctx.hits, ctx.embed_ms, ctx.scan_ms
+    llm(ctx.prompt + "\n\nQuestion: how do I enable TLS?")
+```
+
+`examples/02_topic_context.py` is the proof: it indexes this repo's docs as
+the topic, runs live prompts with the latency split into embed vs scan,
+re-indexes after an edit (only the changed chunk is embedded), optionally
+asks a local Ollama model with the retrieved context, and finishes with a
+synthetic scale run. Measured on an 8-core CPU box (Ollama CPU-only):
+
+| Step | Cost | Where the time goes |
+|------|------|---------------------|
+| Prompt → context (33 chunks) | 1.2–1.5 s | Ollama embed of the prompt: >99.9 %. Scan: 0.2–0.5 ms |
+| Re-index after one edit | 1 embed call | 32 chunks hash-skipped, 1 re-embedded |
+| Scan, 1k × 768 | 0.3 ms p50 / 1.3 ms p95 | numpy GEMV + argpartition |
+| Scan, 10k × 768 | 2.4 ms p50 / 7.3 ms p95 | |
+| Scan, 50k × 768 | 12 ms p50 / 22 ms p95 | |
+
+The retrieval itself is never the bottleneck at this scale; the embedder is.
+On a GPU or with a cloud embedder the prompt-to-context time drops to tens
+of milliseconds and the scan numbers above are what remains.
+
+```bash
+PYTHONPATH=. python examples/02_topic_context.py --fresh                  # cold build + queries + scale
+PYTHONPATH=. python examples/02_topic_context.py --llm llama3.2:3b        # + grounded answer
+```
 
 ## Tests + example
 

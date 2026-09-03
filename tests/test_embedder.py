@@ -141,3 +141,28 @@ def test_ollama_raises_on_transport_error(monkeypatch):
 def test_ollama_empty_batch_is_noop():
     e = Embedder.ollama(model="x")
     assert e.embed([]) == []
+
+
+def test_ollama_batches_requests_in_order(monkeypatch):
+    e = Embedder.ollama(model="nomic-embed-text", batch_size=4)
+
+    class _BatchClient:
+        def __init__(self):
+            self.calls: list[list[str]] = []
+
+        def post(self, url, json=None):
+            self.calls.append(list(json["input"]))
+            # Each text → a vector whose first coordinate encodes its index.
+            vecs = [[float(t[1:])] + [0.0] * 767 for t in json["input"]]
+            return _FakeResponse(200, {"embeddings": vecs})
+
+    client = _BatchClient()
+    monkeypatch.setattr(e, "_client", lambda: client)
+    out = e.embed([f"t{i}" for i in range(10)])
+    assert [len(c) for c in client.calls] == [4, 4, 2]          # 10 texts → 3 requests
+    assert [v[0] for v in out] == [float(i) for i in range(10)]  # order preserved across batches
+
+
+def test_ollama_rejects_bad_batch_size():
+    with pytest.raises(ValueError):
+        Embedder.ollama(model="x", batch_size=0)

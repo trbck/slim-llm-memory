@@ -53,8 +53,10 @@ class Embedder(ABC):
         model: str = "nomic-embed-text",
         base_url: str = "http://localhost:11434",
         timeout: float = 60.0,
+        batch_size: int = 16,
     ) -> "Embedder":
-        return _OllamaEmbedder(model=model, base_url=base_url, timeout=timeout)
+        """``batch_size`` texts per HTTP request; ``timeout`` applies per request."""
+        return _OllamaEmbedder(model=model, base_url=base_url, timeout=timeout, batch_size=batch_size)
 
 
 # ─── noop ─────────────────────────────────────────────────────────────────
@@ -109,12 +111,15 @@ _KNOWN_OLLAMA_DIMS: dict[str, int] = {
 
 
 class _OllamaEmbedder(Embedder):
-    def __init__(self, model: str, base_url: str, timeout: float) -> None:
+    def __init__(self, model: str, base_url: str, timeout: float, batch_size: int = 16) -> None:
         if not model or not isinstance(model, str):
             raise ValueError("model must be a non-empty string")
+        if batch_size < 1:
+            raise ValueError("batch_size must be >= 1")
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.timeout = float(timeout)
+        self.batch_size = int(batch_size)
         self.name = f"ollama:{model}"
         self.dim = _KNOWN_OLLAMA_DIMS.get(model, 0)
         self._http = None  # lazy
@@ -128,8 +133,16 @@ class _OllamaEmbedder(Embedder):
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+        # One HTTP request per ``batch_size`` texts: a CPU-only Ollama embeds
+        # ~100-word chunks at roughly 0.5–1 s each, so an unbounded batch of a
+        # whole corpus would blow the per-request timeout.
+        out: list[list[float]] = []
+        for start in range(0, len(texts), self.batch_size):
+            out.extend(self._embed_batch(texts[start:start + self.batch_size]))
+        return out
+
+    def _embed_batch(self, texts: list[str]) -> list[list[float]]:
         # Ollama /api/embed accepts {"model": ..., "input": [str|list]}.
-        # Batched input keeps GPU/CPU warm and saves per-call overhead.
         payload = {"model": self.model, "input": texts}
         try:
             resp = self._client().post(f"{self.base_url}/api/embed", json=payload)

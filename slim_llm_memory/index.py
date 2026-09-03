@@ -245,6 +245,30 @@ class Memory:
         self.obs.count("search.calls")
         return hits
 
+    def search_vector(
+        self,
+        vector: "Iterable[float] | np.ndarray",
+        k: int = 10,
+        kinds: set[str] | None = None,
+        min_score: float = 0.0,
+    ) -> list[Hit]:
+        """Top-k neighbours of an already-embedded query vector.
+
+        Same ranking as ``search`` but no embedder call — callers that
+        embed once and want to time (or reuse) the scan separately use
+        this. ``vector`` is normalised here; shape must be ``(dim,)``.
+        """
+        if k < 1 or self.store.vectors.shape[0] == 0:
+            return []
+        qv = np.asarray(vector, dtype=np.float32)
+        if qv.shape != (self.embedder.dim,):
+            raise ValueError(f"vector shape {qv.shape} != ({self.embedder.dim},)")
+        t0 = time.time()
+        hits = self._rank(_normalise(qv), k, kinds, min_score)
+        self.obs.record_slow("search_vector", (time.time() - t0) * 1000)
+        self.obs.count("search_vector.calls")
+        return hits
+
     def neighbours(self, item_id: str, k: int = 10, kinds: set[str] | None = None) -> list[Hit]:
         """Nearest stored items to an existing item. No embedder call — one GEMV."""
         idx = self.store._id_to_idx.get(item_id)
