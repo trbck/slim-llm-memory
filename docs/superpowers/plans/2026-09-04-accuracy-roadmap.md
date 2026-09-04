@@ -46,3 +46,18 @@ s.history(n=10)
 | 3b enrich | `enrich.py` (LLM JSON extraction), `topics.py` | mocked LLM | entities filter works |
 | 4 sessions | `sessions.py`, `libraries.py` (`session()`) | `test_sessions.py` | recall works |
 | demo | `notebooks/accuracy_demo.ipynb` | executed | before/after table |
+
+## Results (2026-09-04, notebooks/accuracy_demo.ipynb, this repo's docs, 8 questions)
+
+| retrieval | hit@1 | hit@5 | MRR |
+|---|---|---|---|
+| dense | 0.38 | 0.62 | 0.47 |
+| keyword (BM25) | 0.25 | 0.88 | 0.50 |
+| hybrid, linear fusion α=0.5 (default) | 0.38 | 0.88 | 0.56 |
+| hybrid + cross-encoder rerank | 0.62 | 1.00 | 0.76 |
+
+Tuning grid (chunk 120/160, overlap 0/20, α 0.3–0.6): no effect from chunking on this corpus; α=0.5 best.
+Multilingual (bge-m3) EN→DE: 4/4 at rank 1 (was 1/3 with nomic-embed-text).
+Speed at 50k chunks: BM25 build 7.2 s (cached per store version), BM25 query 2.8 ms; hybrid ask at 20k
+chunks p50 6.6 ms / p95 10.3 ms. Cross-encoder ≈ 1 s per candidate on this loaded CPU → opt-in.
+Verdict on Cython/Go: not needed; first candidate would be the BM25 tokeniser above ~500k chunks.

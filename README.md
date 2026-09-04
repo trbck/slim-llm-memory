@@ -171,9 +171,18 @@ evaluate(t, [("which file is the commit point?", "manifest"), ...], k=5)   # hit
 ```
 
 On the eight doc questions in `notebooks/accuracy_demo.ipynb` (four of them
-with the product name in the question, which drags the intro chunks up):
-dense MRR 0.44 → hybrid 0.78. Chunks are heading-aware with a 20-word
-overlap (`topic(..., chunk_words=120, overlap=20)`).
+with the product name in the question, which drags the intro chunks up),
+measured over this repo's own docs:
+
+| retrieval | hit@1 | hit@5 | MRR |
+|---|---|---|---|
+| dense | 0.38 | 0.62 | 0.47 |
+| hybrid (default) | 0.38 | 0.88 | 0.56 |
+| hybrid + cross-encoder rerank | 0.62 | 1.00 | 0.76 |
+
+Chunks are heading-aware with a 20-word overlap (`topic(..., chunk_words=120,
+overlap=20)`); a tuning grid over chunk size, overlap and the fusion weight is
+in the notebook and confirms the defaults. Re-tune per corpus with `evaluate()`.
 
 ### Structure: graph, entities, sessions
 

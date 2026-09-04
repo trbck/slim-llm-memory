@@ -479,19 +479,31 @@ class Topic:
                 hits_by_doc[d] = h
         fused = {d: alpha * max(c, 0.0) for d, c in scores.items()}
         if (self.path / "graph.json").exists() or self._graph is not None:
+            # Direct edges to docs count fully; an entity node (no chunks of its own) is a
+            # bridge: doc —mentions→ Postgres ←mentions— other doc, at half weight.
+            paths: list[tuple[str, str, float]] = []
             for node, rel, w in self.graph.neighbours(me or doc_or_id):
+                if self._first_chunk(node) is not None:
+                    paths.append((node, rel, w))
+                else:
+                    for n2, rel2, w2 in self.graph.neighbours(node):
+                        if n2 != me and self._first_chunk(n2) is not None:
+                            paths.append((n2, f"{rel}→{node}→{rel2}", 0.5 * w * w2))
+            for node, rel, w in paths:
                 d = node.split("#", 1)[0]
                 if d == me:
                     continue
                 fused[d] = fused.get(d, 0.0) + (1 - alpha) * min(w, 1.0)
                 if d not in hits_by_doc:
                     fid = self._first_chunk(d)
-                    if fid is not None:
-                        it = store.items[store._id_to_idx[fid]]
-                        hits_by_doc[d] = Hit(id=it.id, score=float(store.vectors[store._id_to_idx[fid]]
-                                                                     @ store.vectors[store._id_to_idx[first]]),
-                                             text=it.text, meta=dict(it.meta))
-                hits_by_doc[d].meta = dict(hits_by_doc[d].meta, relation=rel)
+                    if fid is None:
+                        continue
+                    it = store.items[store._id_to_idx[fid]]
+                    hits_by_doc[d] = Hit(id=it.id, score=float(store.vectors[store._id_to_idx[fid]]
+                                                                 @ store.vectors[store._id_to_idx[first]]),
+                                         text=it.text, meta=dict(it.meta))
+                if "relation" not in hits_by_doc[d].meta:
+                    hits_by_doc[d].meta = dict(hits_by_doc[d].meta, relation=rel)
         order = sorted(fused, key=lambda d: -fused[d])[:k]
         out = []
         for d in order:

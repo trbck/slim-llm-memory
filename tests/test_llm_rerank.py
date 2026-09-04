@@ -26,6 +26,7 @@ def test_validate_citations_drops_dangling_and_dedupes():
     clean, cited = validate_citations("It is manifest.json [1] and [3], not [9]. Also [1].", n_hits=3)
     assert clean == "It is manifest.json [1] and [3], not . Also [1]."
     assert cited == [1, 3]
+    assert validate_citations("see [n2] and [n 1]", 3) == ("see [2] and [1]", [2, 1])
 
 
 def test_answer_is_a_str_with_attributes():

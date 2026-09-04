@@ -13,10 +13,11 @@ import re
 from typing import Any, Iterator
 
 DEFAULT_OLLAMA = "http://localhost:11434"
-_CITE = re.compile(r"\[(\d+)\]")
+_CITE = re.compile(r"\[n?\s*(\d+)\]")   # tolerate [n3] from literal-minded models
 
-SYSTEM_GROUNDED = ("Answer in one or two sentences, strictly from the context. Cite the chunks you use "
-                   "as [n]. If the context does not contain the answer, say so in one sentence.")
+SYSTEM_GROUNDED = ("Answer in one or two sentences, strictly from the context. Cite the chunks you use by "
+                   "their number in square brackets, for example [1] or [2]. If the context does not contain "
+                   "the answer, say so in one sentence.")
 SYSTEM_REWRITE = ("Rewrite the user's question as a compact search query: the key nouns, names, numbers and "
                   "verbs, no filler words, no product names that are only scoping. Reply with the query only.")
 
@@ -79,7 +80,7 @@ def validate_citations(text: str, n_hits: int) -> tuple[str, list[int]]:
         if 1 <= n <= n_hits:
             if n not in cited:
                 cited.append(n)
-            return m.group(0)
+            return f"[{n}]"
         return ""
 
     clean = _CITE.sub(_keep, text)

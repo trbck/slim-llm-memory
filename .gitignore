@@ -19,3 +19,5 @@ htmlcov/
 .topic_store_nb/
 .library_nb/
 .usecases_nb/
+.accuracy_nb/
+.accuracy_nb_ml/

@@ -67,3 +67,16 @@ def test_topic_link_related_and_wikilinks(tmp_path: Path):
         assert "certbot.md" not in t.graph.nodes()
     with topic("g", path=tmp_path / "g", embedder="noop:64", chunk_words=3, overlap=0) as t:
         assert "certbot.md" not in t.graph.nodes() and "nginx.md" in t.graph.nodes()   # persisted
+
+
+def test_related_bridges_through_entity_nodes(tmp_path: Path):
+    with topic("b", path=tmp_path / "b", embedder="noop:64", chunk_words=50, overlap=0) as t:
+        t.add({"db.md": "pool exhausted", "runbook.md": "restart pods", "cdn.md": "egress cost"})
+        t.link("db.md", "Postgres", "mentions")            # entity node: no chunks
+        t.link("runbook.md", "Postgres", "mentions")
+        r = t.related("db.md", k=3)
+        docs = [h.meta["doc"] for h in r]
+        assert "runbook.md" in docs                        # reached via the entity bridge
+        rb = next(h for h in r if h.meta["doc"] == "runbook.md")
+        assert rb.meta["relation"] == "mentions→Postgres→mentions" and rb.meta["via"] == "graph"
+        assert "Postgres" not in docs and "db.md" not in docs
