@@ -1,0 +1,79 @@
+{
+  "budget_usd": 5.0,
+  "cap": 4,
+  "stall": 2,
+  "determinism_runs": 2,
+  "review": {"enabled": false, "reasoning": "5 small additions to code this session authored and tested; the frozen checks plus the 161-test suite are the gate"},
+  "milestones": [
+    {
+      "id": "M1",
+      "title": "should_rerank(scores, margin) decides from the top-two gap relative to the pool spread",
+      "box": "`should_rerank(scores, margin)` decides from the top-two gap relative to the pool spread",
+      "check": "/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_should_rerank_uses_relative_gap",
+      "kind": "test",
+      "tier": "T1",
+      "after": [],
+      "protect": ["tests/test_rerank_auto.py"],
+      "gold": "",
+      "already_green": false,
+      "proxy_gap": "the shape of the decision, not whether 0.15 is the right default margin for real corpora",
+      "must_have": true
+    },
+    {
+      "id": "M2",
+      "title": "Reranker.cross_encoder accepts and uses max_length (default 256) and batch_size (default 32)",
+      "box": "`Reranker.cross_encoder` accepts and uses `max_length` (default 256) and `batch_size` (default 32)",
+      "check": "/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_cross_encoder_passes_max_length_and_batch_size",
+      "kind": "test",
+      "tier": "T1",
+      "after": [],
+      "protect": ["tests/test_rerank_auto.py"],
+      "gold": "",
+      "already_green": false,
+      "proxy_gap": "the parameters reach the model; not the accuracy cost of truncating to 256 tokens",
+      "must_have": true
+    },
+    {
+      "id": "M3",
+      "title": "Topic.ask(rerank=rr, rerank_margin=m) skips the reranker when the leader is clear, and says so",
+      "box": "`Topic.ask(rerank=rr, rerank_margin=m)` skips the reranker when the leader is clear, and says so",
+      "check": "/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py -k topic_auto",
+      "kind": "test",
+      "tier": "T2",
+      "after": ["M1"],
+      "protect": ["tests/test_rerank_auto.py"],
+      "gold": "",
+      "already_green": false,
+      "proxy_gap": "wiring and reporting on a 3-chunk fixture; not end-to-end quality on a real corpus",
+      "must_have": true
+    },
+    {
+      "id": "M4",
+      "title": "Library.ask supports the same adaptive policy",
+      "box": "`Library.ask` supports the same adaptive policy",
+      "check": "/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_library_auto_matches_topic",
+      "kind": "test",
+      "tier": "T2",
+      "after": ["M3"],
+      "protect": ["tests/test_rerank_auto.py"],
+      "gold": "",
+      "already_green": false,
+      "proxy_gap": "flat and routed paths on two topics; not many-topic fan-out",
+      "must_have": true
+    },
+    {
+      "id": "M5",
+      "title": "examples/04_rerank_bench.py reports MRR, reranker calls and latency for off / auto / always",
+      "box": "`examples/04_rerank_bench.py` reports MRR, reranker calls and latency for off / auto / always",
+      "check": "/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_bench_offline_reports_three_policies",
+      "kind": "artifact",
+      "tier": "T2",
+      "after": ["M4"],
+      "protect": ["tests/test_rerank_auto.py"],
+      "gold": "",
+      "already_green": false,
+      "proxy_gap": "the offline run with a stub reranker; the real-model numbers come from the demo, not this check",
+      "must_have": true
+    }
+  ]
+}

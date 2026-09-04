@@ -1,0 +1,110 @@
+{
+ "compiled_at": "2026-09-04T15:05:28Z",
+ "budget_usd": 5.0,
+ "cap": 4,
+ "stall": 2,
+ "determinism_runs": 2,
+ "milestones": [
+  {
+   "id": "M1",
+   "title": "should_rerank(scores, margin) decides from the top-two gap relative to the pool spread",
+   "check": "/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_should_rerank_uses_relative_gap",
+   "protect": [
+    "tests/test_rerank_auto.py"
+   ],
+   "after": [],
+   "kind": "test",
+   "tier": "T1",
+   "proxy_gap": "the shape of the decision, not whether 0.15 is the right default margin for real corpora",
+   "must_have": true,
+   "hash": "8919a8eb820193e8",
+   "baseline": "falsifiable",
+   "counterexample_at_compile": "ERROR: found no collectors for /home/trbck/workspace/slim-llm-memory/tests/test_rerank_auto.py::test_should_rerank_uses_relative_gap",
+   "frozen_at": "2026-09-04T15:05:29Z",
+   "timeout": 300
+  },
+  {
+   "id": "M2",
+   "title": "Reranker.cross_encoder accepts and uses max_length (default 256) and batch_size (default 32)",
+   "check": "/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_cross_encoder_passes_max_length_and_batch_size",
+   "protect": [
+    "tests/test_rerank_auto.py"
+   ],
+   "after": [],
+   "kind": "test",
+   "tier": "T1",
+   "proxy_gap": "the parameters reach the model; not the accuracy cost of truncating to 256 tokens",
+   "must_have": true,
+   "hash": "086164397b6de8a2",
+   "baseline": "falsifiable",
+   "counterexample_at_compile": "ERROR: found no collectors for /home/trbck/workspace/slim-llm-memory/tests/test_rerank_auto.py::test_cross_encoder_passes_max_length_and_batch_size",
+   "frozen_at": "2026-09-04T15:05:30Z",
+   "timeout": 300
+  },
+  {
+   "id": "M3",
+   "title": "Topic.ask(rerank=rr, rerank_margin=m) skips the reranker when the leader is clear, and says so",
+   "check": "/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py -k topic_auto",
+   "protect": [
+    "tests/test_rerank_auto.py"
+   ],
+   "after": [
+    "M1"
+   ],
+   "kind": "test",
+   "tier": "T2",
+   "proxy_gap": "wiring and reporting on a 3-chunk fixture; not end-to-end quality on a real corpus",
+   "must_have": true,
+   "hash": "511e4296cbcbf847",
+   "baseline": "falsifiable",
+   "counterexample_at_compile": "Traceback:",
+   "frozen_at": "2026-09-04T15:05:31Z",
+   "timeout": 300
+  },
+  {
+   "id": "M4",
+   "title": "Library.ask supports the same adaptive policy",
+   "check": "/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_library_auto_matches_topic",
+   "protect": [
+    "tests/test_rerank_auto.py"
+   ],
+   "after": [
+    "M3"
+   ],
+   "kind": "test",
+   "tier": "T2",
+   "proxy_gap": "flat and routed paths on two topics; not many-topic fan-out",
+   "must_have": true,
+   "hash": "332f515ce42eff01",
+   "baseline": "falsifiable",
+   "counterexample_at_compile": "ERROR: found no collectors for /home/trbck/workspace/slim-llm-memory/tests/test_rerank_auto.py::test_library_auto_matches_topic",
+   "frozen_at": "2026-09-04T15:05:32Z",
+   "timeout": 300
+  },
+  {
+   "id": "M5",
+   "title": "examples/04_rerank_bench.py reports MRR, reranker calls and latency for off / auto / always",
+   "check": "/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_bench_offline_reports_three_policies",
+   "protect": [
+    "tests/test_rerank_auto.py"
+   ],
+   "after": [
+    "M4"
+   ],
+   "kind": "artifact",
+   "tier": "T2",
+   "proxy_gap": "the offline run with a stub reranker; the real-model numbers come from the demo, not this check",
+   "must_have": true,
+   "hash": "f03fa88fe6e810c0",
+   "baseline": "falsifiable",
+   "counterexample_at_compile": "ERROR: found no collectors for /home/trbck/workspace/slim-llm-memory/tests/test_rerank_auto.py::test_bench_offline_reports_three_policies",
+   "frozen_at": "2026-09-04T15:05:33Z",
+   "timeout": 300
+  }
+ ],
+ "review": {
+  "enabled": false,
+  "reasoning": "5 small additions to code this session authored and tested; the frozen checks plus the 161-test suite are the gate"
+ },
+ "base_sha": "f1f3507ca7d62aca44435fd0bf392dee192c6d11"
+}

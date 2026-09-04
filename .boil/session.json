@@ -1,0 +1,137 @@
+{
+  "session_id": "boil-slim-llm-memory-20260904-170540",
+  "stem": "",
+  "project": "/home/trbck/workspace/slim-llm-memory",
+  "project_name": "slim-llm-memory",
+  "goal": "Reranking that costs nothing on easy queries \u2014 run the cross-encoder only when the top of the ranking is actually contested.",
+  "started_at": "2026-09-04T15:05:40Z",
+  "updated_at": "2026-09-04T15:08:05Z",
+  "status": "idle",
+  "iteration": "M1#1",
+  "goal_progress": {
+    "green": 0,
+    "total": 5
+  },
+  "checkboxes": [
+    {
+      "done": false,
+      "text": "`should_rerank(scores, margin)` decides from the top-two gap relative to the pool spread {#M1}"
+    },
+    {
+      "done": false,
+      "text": "`Reranker.cross_encoder` accepts and uses `max_length` (default 256) and `batch_size` (default 32) {#M2}"
+    },
+    {
+      "done": false,
+      "text": "`Topic.ask(rerank=rr, rerank_margin=m)` skips the reranker when the leader is clear, and says so {#M3}"
+    },
+    {
+      "done": false,
+      "text": "`Library.ask` supports the same adaptive policy {#M4}"
+    },
+    {
+      "done": false,
+      "text": "`examples/04_rerank_bench.py` reports MRR, reranker calls and latency for off / auto / always {#M5}"
+    }
+  ],
+  "milestones": [
+    {
+      "id": "M1",
+      "title": "should_rerank(scores, margin) decides from the top-two gap relative to the pool spread",
+      "tier": "T1",
+      "kind": "test",
+      "must_have": true,
+      "after": [],
+      "attempts": 1,
+      "result": "FAIL",
+      "counterexample": "AUDIT: write under protected path: tests/test_rerank_auto.py; monkey-patching in tests/test_rerank_auto.py: +def test_cross_encoder_passes_max_length_and_batch_size(monkeypatch):; monkey-patching in tests/test_rerank_auto.py: +    monkeypat",
+      "spend_usd": 0.1
+    },
+    {
+      "id": "M2",
+      "title": "Reranker.cross_encoder accepts and uses max_length (default 256) and batch_size (default 32)",
+      "tier": "T1",
+      "kind": "test",
+      "must_have": true,
+      "after": [],
+      "attempts": 0,
+      "result": "-",
+      "counterexample": "",
+      "spend_usd": 0
+    },
+    {
+      "id": "M3",
+      "title": "Topic.ask(rerank=rr, rerank_margin=m) skips the reranker when the leader is clear, and says so",
+      "tier": "T2",
+      "kind": "test",
+      "must_have": true,
+      "after": [
+        "M1"
+      ],
+      "attempts": 0,
+      "result": "-",
+      "counterexample": "",
+      "spend_usd": 0
+    },
+    {
+      "id": "M4",
+      "title": "Library.ask supports the same adaptive policy",
+      "tier": "T2",
+      "kind": "test",
+      "must_have": true,
+      "after": [
+        "M3"
+      ],
+      "attempts": 0,
+      "result": "-",
+      "counterexample": "",
+      "spend_usd": 0
+    },
+    {
+      "id": "M5",
+      "title": "examples/04_rerank_bench.py reports MRR, reranker calls and latency for off / auto / always",
+      "tier": "T2",
+      "kind": "artifact",
+      "must_have": true,
+      "after": [
+        "M4"
+      ],
+      "attempts": 0,
+      "result": "-",
+      "counterexample": "",
+      "spend_usd": 0
+    }
+  ],
+  "tickets": [],
+  "decisions": [],
+  "blockers": [],
+  "events": [
+    {
+      "ts": "2026-09-04T15:08:05Z",
+      "kind": "boil.score",
+      "ticket": "M1",
+      "attempt": 1,
+      "status": "FAIL",
+      "detail": "AUDIT: write under protected path: tests/test_rerank_auto.py; monkey-patching in tests/test_rerank_auto.py: +def test_cross_encoder_passes_max_length_and_batch_size(monkeypatch):; monkey-patching in tests/test_rerank_auto.py: +    monkeypat"
+    },
+    {
+      "ts": "2026-09-04T15:05:40Z",
+      "kind": "boil.prepare",
+      "ticket": "M1",
+      "attempt": 1,
+      "status": "dispatch",
+      "detail": "should_rerank(scores, margin) decides from the top-two gap relative to the pool spread"
+    }
+  ],
+  "demo": "",
+  "counts": {
+    "milestones": 5,
+    "milestones_green": 0,
+    "tickets": 0,
+    "open": 0,
+    "in_progress": 0,
+    "done": 0,
+    "loops_running": 0,
+    "loops_escalated": 0
+  }
+}
