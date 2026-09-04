@@ -158,6 +158,35 @@ within 0.05 of the best centroid are kept, and a prompt that matches no
 topic falls back to the exact scan. `examples/03_routing_bench.py` has the
 numbers: at 500 topics × 200 chunks, routing cuts the scan from ~40 ms to ~2 ms.
 
+### Accuracy: hybrid retrieval, reranking, evaluation
+
+```python
+t.ask(q)                                    # hybrid (default): dense cosine ∪ BM25, fused by normalised score
+t.ask(q, mode="dense") / t.ask(q, mode="keyword")
+t.ask(q, rerank=True)                       # cross-encoder over the top 4·k  (pip install slim-llm-memory[rerank])
+t.answer(q, rewrite=True, refuse_below=0.4, stream=False)   # query rewrite, refusal, validated [n] citations
+
+from slim_llm_memory import evaluate
+evaluate(t, [("which file is the commit point?", "manifest"), ...], k=5)   # hit@1, hit@k, MRR
+```
+
+On the eight doc questions in `notebooks/accuracy_demo.ipynb` (four of them
+with the product name in the question, which drags the intro chunks up):
+dense MRR 0.44 → hybrid 0.78. Chunks are heading-aware with a 20-word
+overlap (`topic(..., chunk_words=120, overlap=20)`).
+
+### Structure: graph, entities, sessions
+
+```python
+t.link("nginx.md", "certbot.md", relation="uses")    # typed edges, graph.json next to the vectors
+t.related("nginx.md")                                # 0.6·cosine + 0.4·graph; [[wikilinks]] become edges on add
+t.add(text, enrich=True)                             # local LLM extracts entities + relations (slow, opt-in)
+t.entities(); t.ask(q, entity="Postgres")            # filter by extracted entity
+
+s = db.session("2026-09-04")                         # conversation memory as a topic store
+s.turn("user", "..."); s.recall("what did we decide?"); s.history(5); s.summary(model=...)
+```
+
 `notebooks/library_demo.ipynb` walks through it. `notebooks/use_cases_demo.ipynb`
 measures four real use cases (grounded answers, paraphrase, languages, agent
 session memory) and ends with an honest table of what is missing compared to a

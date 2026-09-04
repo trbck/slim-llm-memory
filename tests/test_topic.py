@@ -47,7 +47,7 @@ def test_search_vector_matches_search(tmp_path: Path):
 
 @pytest.fixture
 def t(tmp_path: Path):
-    tp = topic("Test Topic", path=tmp_path / "store", embedder="noop:64", chunk_words=3)
+    tp = topic("Test Topic", path=tmp_path / "store", embedder="noop:64", chunk_words=3, overlap=0)
     yield tp
     tp.close()
 
@@ -130,9 +130,9 @@ def test_ask_word_budget_and_no_hits(t: Topic):
 
 
 def test_topic_persists_across_reopen(tmp_path: Path):
-    with topic("p", path=tmp_path / "p", embedder="noop:64", chunk_words=3) as tp:
+    with topic("p", path=tmp_path / "p", embedder="noop:64", chunk_words=3, overlap=0) as tp:
         tp.add({"a.md": A_MD, "b.md": B_MD})          # add() saves; no flush call needed
-    with topic("p", path=tmp_path / "p", embedder="noop:64", chunk_words=3) as tp:
+    with topic("p", path=tmp_path / "p", embedder="noop:64", chunk_words=3, overlap=0) as tp:
         assert len(tp) == 5 and tp.docs() == ["a.md", "b.md"]
         assert tp.ask("milch kaufen", k=1, min_score=0.0).top.id == "b.md#0"
 
@@ -175,3 +175,47 @@ def test_topic_open_elsewhere_gives_a_hint(tmp_path: Path):
     with Topic("x", path=tmp_path / "x", embedder="noop:64"):   # direct Topic() bypasses the registry
         with pytest.raises(StoreError, match="another process"):
             topic("x", path=tmp_path / "x", embedder="noop:64")
+
+
+# ─── hybrid retrieval ─────────────────────────────────────────────────────
+
+def test_modes_and_via(t: Topic):
+    t.add({"a.md": "the atomic commit point is manifest.json\n\nunrelated words here\n\nmore filler text"})
+    kw = t.ask("manifest.json", k=2, mode="keyword", min_score=0.0)
+    assert kw.top.id == "a.md#0" and kw.top.meta["via"] == "keyword" and kw.mode == "keyword"
+    hy = t.ask("manifest.json", k=3, mode="hybrid", min_score=0.0)
+    assert "a.md#0" in [h.id for h in hy.hits][:2]                 # exact token survives a random dense leg
+    assert all(h.meta["via"] in {"dense", "keyword", "both"} for h in hy.hits)
+    de = t.ask("manifest.json", k=3, mode="dense", min_score=-1.0)
+    assert all(h.meta["via"] == "dense" for h in de.hits) and de.mode == "dense"
+    assert "[keyword]" in repr(kw) and "· keyword ·" in repr(kw)
+    with pytest.raises(ValueError):
+        t.ask("x", mode="bogus")
+
+
+def test_hybrid_agrees_with_dense_on_exact_text(t: Topic):
+    t.add({"a.md": A_MD, "b.md": B_MD})
+    hy = t.ask("para two about tls", k=1, min_score=0.0)              # default mode is hybrid
+    assert hy.top.id == "a.md#1" and hy.top.meta["via"] == "both" and abs(hy.top.score - 1.0) < 1e-5
+
+
+def test_keyword_index_cached_on_disk_per_version(t: Topic):
+    t.add({"a.md": A_MD})
+    t.ask("nginx", mode="keyword", min_score=0.0)
+    files = sorted(p.name for p in t.path.glob("bm25.v*.npz"))
+    assert len(files) == 1
+    t.add({"b.md": B_MD})
+    t.ask("milch", mode="keyword", min_score=0.0)
+    files2 = sorted(p.name for p in t.path.glob("bm25.v*.npz"))
+    assert len(files2) == 1 and files2 != files                      # stale version replaced
+    ix, rows = t._keyword_index()
+    assert ix.n == rows.size == 5
+
+
+def test_chunk_overlap_and_heading_meta(tmp_path: Path):
+    with topic("o", path=tmp_path / "o", embedder="noop:64", chunk_words=120, overlap=10) as tp:
+        body = " ".join(f"w{i}" for i in range(100))
+        tp.add({"d.md": f"# Setup\n\n{body}\n\n{body}\n\n## Tuning\n\nworker processes"})
+        items = [it for it in tp.memory.store.items if not it.deleted]
+        assert [it.meta.get("heading") for it in items] == ["# Setup", "# Setup", "## Tuning"]
+        assert items[1].text.startswith("# Setup\n\n… w90 w91")

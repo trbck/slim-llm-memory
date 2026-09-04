@@ -38,7 +38,11 @@ import numpy as np
 
 from .embed import Embedder
 from .index import Hit, _normalise
-from .topics import DEFAULT_HOME, DEFAULT_OLLAMA, Result, Topic, _make_embedder, _slug, topic as _open_topic
+from .llm import grounded_answer
+from .rerank import Reranker, resolve as resolve_reranker
+from .sessions import Session
+from .topics import (DEFAULT_HOME, DEFAULT_OLLAMA, Cand, Result, Topic, _make_embedder, _slug, apply_reranker,
+                     fuse, has_entity, topic as _open_topic)
 
 ARCHIVE_DIR = "_archive"
 _META = "topic.json"
@@ -84,15 +88,17 @@ class Library:
 
     def __init__(self, path: "str | Path | None" = None, *,
                  embedder: "str | Embedder" = "ollama:nomic-embed-text",
-                 ollama_url: str = DEFAULT_OLLAMA, chunk_words: int = 120) -> None:
+                 ollama_url: str = DEFAULT_OLLAMA, chunk_words: int = 120, overlap: int = 20) -> None:
         self.path = (Path(path).expanduser() if path else DEFAULT_HOME.expanduser()).resolve()
         self.path.mkdir(parents=True, exist_ok=True)
         (self.path / ARCHIVE_DIR).mkdir(exist_ok=True)
         self.embedder = _make_embedder(embedder, ollama_url)
         self.ollama_url = ollama_url
         self.chunk_words = int(chunk_words)
+        self.overlap = int(overlap)
         self._open: dict[str, Topic] = {}          # slug → open Topic (active or archived)
         self._flat_cache: tuple | None = None     # (key, M, owner, row) for exact fan-out
+        self._sessions: dict[Path, Session] = {}
 
     # ─── paths ────────────────────────────────────────────────────────────
     def _dir(self, slug: str, archived: bool = False) -> Path:
@@ -130,7 +136,7 @@ class Library:
         meta = self._read_meta(d) if d.is_dir() else {}
         display = meta.get("name") or name or slug
         t = _open_topic(display, path=d, embedder=self.embedder, ollama_url=self.ollama_url,
-                        chunk_words=self.chunk_words)
+                        chunk_words=self.chunk_words, overlap=self.overlap)
         if not (d / _META).exists():
             (d / _META).write_text(json.dumps({"name": display, "created": time.time()}), encoding="utf-8")
         self._open[slug] = t
@@ -150,7 +156,7 @@ class Library:
         """Active topics (or the archived ones), alphabetical. Cheap: reads manifests, opens nothing."""
         base = self.path / ARCHIVE_DIR if archived else self.path
         out: list[TopicInfo] = []
-        for d in sorted(p for p in base.iterdir() if p.is_dir() and p.name != ARCHIVE_DIR and not p.name.startswith(".")):
+        for d in sorted(p for p in base.iterdir() if p.is_dir() and not p.name.startswith((".", "_"))):
             meta = self._read_meta(d)
             t = self._open.get(d.name)
             if t is not None and not t.closed and t.path == d:
@@ -222,6 +228,24 @@ class Library:
         slug, archived = self._find(name)
         self._close_slug(slug)
         shutil.rmtree(self._dir(slug, archived))
+
+    # ─── sessions ─────────────────────────────────────────────────────────
+    def session(self, name: str) -> Session:
+        """Conversation memory stored under ``<library>/_sessions/<slug>/`` — see :class:`Session`."""
+        s = Session(name, path=self.path / "_sessions" / _slug(name), embedder=self.embedder,
+                    ollama_url=self.ollama_url)
+        self._sessions[s.path] = s
+        return s
+
+    def sessions(self) -> list[str]:
+        base = self.path / "_sessions"
+        if not base.is_dir():
+            return []
+        out = []
+        for d in sorted(p for p in base.iterdir() if p.is_dir()):
+            meta = self._read_meta(d)
+            out.append((meta.get("name") or d.name).removeprefix("session "))
+        return out
 
     # ─── candidates ───────────────────────────────────────────────────────
     def _candidates(self, topics: "Iterable[str] | None", include_archived: bool) -> list[tuple[Topic, bool]]:
@@ -316,7 +340,8 @@ class Library:
     # ─── ask ──────────────────────────────────────────────────────────────
     def ask(self, prompt: str, k: int = 5, *, topics: "Iterable[str] | None" = None,
             include_archived: bool = False, min_score: float = 0.3, max_words: int = 600,
-            route: "bool | int | str" = "auto") -> Result:
+            route: "bool | int | str" = "auto", mode: str = "hybrid",
+            rerank: "bool | Reranker | None" = None, entity: "str | None" = None) -> Result:
         """Embed once, then find the best chunks across topics.
 
         ``route``:
@@ -325,10 +350,12 @@ class Library:
           * an int     — two-stage with that many topics at most.
           * ``"auto"`` — exact while the library holds ≤ ROUTE_AUTO_THRESHOLD chunks, else two-stage.
 
-        Hits carry ``meta["topic"]`` and ids prefixed ``topic/``. ``r.routed`` lists the topics
-        scanned (``None`` when exact), ``r.per_topic_ms`` the per-store scan time when routed.
+        ``mode`` is ``"hybrid"`` (dense ∪ BM25, default), ``"dense"`` or ``"keyword"`` — see
+        ``Topic.ask``. Hits carry ``meta["topic"]`` and ids prefixed ``topic/``. ``r.routed``
+        lists the topics scanned (``None`` when exact), ``r.per_topic_ms`` the per-store time.
         """
         cands = self._candidates(topics, include_archived)
+        rr = resolve_reranker(rerank)
         t0 = time.perf_counter()
         qv = _normalise(np.asarray(self.embedder.embed([prompt])[0], dtype=np.float32))
         t1 = time.perf_counter()
@@ -351,26 +378,54 @@ class Library:
             _, chosen = self._route_vec(qv, cands, m, ROUTE_MARGIN, ROUTE_MIN_SCORE)
             route_ms = (time.perf_counter() - r0) * 1000
             routed = [t.name for t, _ in chosen]
-            merged: list[Hit] = []
-            for t, archived in chosen:
-                s0 = time.perf_counter()
-                hits = t.memory.search_vector(qv, k=k, min_score=min_score)
-                per_topic[t.name] = (time.perf_counter() - s0) * 1000
-                merged += [self._label(t, archived, h) for h in hits]
-            merged.sort(key=lambda h: h.score, reverse=True)
-            hits = merged[:k]
-        else:
+            hits = self._merge(qv, prompt, chosen, k, mode, min_score, per_topic, rr, entity)
+        elif mode == "dense" and rr is None and entity is None:
             hits = self._scan_flat(qv, cands, k, min_score)
+        else:
+            hits = self._merge(qv, prompt, cands, k, mode, min_score, per_topic, rr, entity)
         t2 = time.perf_counter()
 
         r = Result(prompt, hits, (t1 - t0) * 1000, (t2 - t1) * 1000 - route_ms, max_words)
+        r.mode, r.reranked = mode, (rr.name if rr else None)
         r.routed, r.routed_of, r.route_ms, r.per_topic_ms = routed, len(cands), route_ms, per_topic
         return r
+
+    def _merge(self, qv: np.ndarray, prompt: str, cands: list[tuple[Topic, bool]], k: int, mode: str,
+               min_score: float, per_topic: dict[str, float], rr: "Reranker | None",
+               entity: "str | None" = None) -> list[Hit]:
+        """Candidates from every topic, fused ONCE over the union so scores compare across topics."""
+        pool = max(20, 4 * k)
+        allc: list[Cand] = []
+        archived_of: dict[int, bool] = {}
+        for t, archived in cands:
+            s0 = time.perf_counter()
+            got = t._candidates(qv, prompt, pool, mode, min_score)
+            per_topic[t.name] = (time.perf_counter() - s0) * 1000
+            allc += got
+            archived_of[id(t)] = archived
+        ranked = fuse(allc, mode)
+        if entity:
+            ranked = [(c, sc) for c, sc in ranked if has_entity(c.topic.memory.store.items[c.idx].meta, entity)]
+        hits = [self._label(c.topic, archived_of[id(c.topic)], c.topic._hit(c)) for c, _ in ranked[: (pool if rr else k)]]
+        if rr and hits:
+            hits = apply_reranker(rr, prompt, hits, k)
+        return hits
+
+    def answer(self, question: str, model: str = "llama3.2:3b", k: int = 4, *, mode: str = "hybrid",
+               rerank: "bool | Reranker | None" = None, min_score: float = 0.3, rewrite: bool = False,
+               stream: bool = False, refuse_below: "float | None" = None, timeout: float = 600.0):
+        """Library-wide ``answer``: retrieve across topics, then one grounded Ollama call. See ``Topic.answer``."""
+        return grounded_answer(self, question, model=model, k=k, mode=mode, rerank=rerank, min_score=min_score,
+                               rewrite=rewrite, stream=stream, refuse_below=refuse_below,
+                               url=self.ollama_url, timeout=timeout)
 
     # ─── lifecycle ────────────────────────────────────────────────────────
     def close(self) -> None:
         for slug in list(self._open):
             self._close_slug(slug)
+        for s in list(self._sessions.values()):
+            s.close()
+        self._sessions.clear()
 
     def __enter__(self) -> "Library":
         return self
@@ -381,6 +436,6 @@ class Library:
 
 def library(path: "str | Path | None" = None, *,
             embedder: "str | Embedder" = "ollama:nomic-embed-text",
-            ollama_url: str = DEFAULT_OLLAMA, chunk_words: int = 120) -> Library:
+            ollama_url: str = DEFAULT_OLLAMA, chunk_words: int = 120, overlap: int = 20) -> Library:
     """Open (or create) a library of topics at ``path``. See :class:`Library`."""
-    return Library(path, embedder=embedder, ollama_url=ollama_url, chunk_words=chunk_words)
+    return Library(path, embedder=embedder, ollama_url=ollama_url, chunk_words=chunk_words, overlap=overlap)

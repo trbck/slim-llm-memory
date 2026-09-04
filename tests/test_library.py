@@ -64,9 +64,11 @@ def test_ask_fans_out_and_merges_by_score(db: Library):
     r = db.ask("boil pasta", k=3, min_score=0.0)
     assert r.top.id == "Cooking at home/pasta.md#0"
     assert r.top.meta["topic"] == "Cooking at home" and r.top.meta["doc"] == "pasta.md"
-    assert r.routed is None and r.per_topic_ms == {}                 # exact fan-out by default
+    assert r.routed is None                                          # exact (unrouted) by default
     assert "[1] (Cooking at home/pasta.md, score 1.00)" in r.context
-    assert len(r) == 3 and [h.score for h in r] == sorted((h.score for h in r), reverse=True)
+    assert len(r) == 3
+    d = db.ask("boil pasta", k=3, min_score=0.0, mode="dense")
+    assert [h.score for h in d] == sorted((h.score for h in d), reverse=True)   # dense: cosine order
 
     only = db.ask("boil pasta", k=3, min_score=0.0, topics=["nginx"])
     assert only and all(h.meta["topic"] == "nginx" for h in only)
@@ -147,7 +149,7 @@ def test_route_falls_back_to_everything_when_no_topic_fits(db: Library, monkeypa
 def test_ask_exact_is_default_for_small_libraries(db: Library):
     fill(db)
     r = db.ask("boil pasta", k=3, min_score=0.0)
-    assert r.routed is None and r.per_topic_ms == {}                  # flat exact path
+    assert r.routed is None                                           # exact, unrouted
     assert r.top.id == "Cooking at home/pasta.md#0"
     assert "routed" not in repr(r)
 
@@ -182,7 +184,7 @@ def test_flat_cache_invalidates_on_change(db: Library):
 
 def test_flat_and_per_topic_paths_agree_on_scores(db: Library):
     fill(db)
-    a = db.ask("enable tls with certbot", k=4, min_score=0.0, route=False)
+    a = db.ask("enable tls with certbot", k=4, min_score=0.0, route=False, mode="dense")
     qv = db.embedder.embed(["enable tls with certbot"])[0]
     expected = []
     for name in ("nginx", "Cooking at home"):
@@ -190,3 +192,14 @@ def test_flat_and_per_topic_paths_agree_on_scores(db: Library):
         expected += [(f"{name}/{h.id}", round(h.score, 5)) for h in t.memory.search_vector(qv, k=4, min_score=0.0)]
     expected.sort(key=lambda x: -x[1])
     assert [(h.id, round(h.score, 5)) for h in a] == expected[:4]
+
+
+def test_library_hybrid_and_keyword_modes(db: Library):
+    fill(db)
+    kw = db.ask("certbot", k=2, mode="keyword", min_score=0.0)
+    assert kw.top.id == "nginx/setup.md#1" and kw.top.meta["via"] == "keyword" and kw.mode == "keyword"
+    hy = db.ask("certbot", k=3, min_score=0.0)                       # hybrid default
+    assert "nginx/setup.md#1" in [h.id for h in hy.hits][:2]
+    assert set(hy.per_topic_ms) == {"nginx", "Cooking at home"}
+    routed = db.ask("certbot", k=2, min_score=0.0, route=True)
+    assert routed.routed is not None and routed.mode == "hybrid"

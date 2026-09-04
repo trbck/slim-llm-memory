@@ -16,8 +16,11 @@ same public API.
 from .embed import Embedder, EmbedderError
 from .index import Hit, Memory
 from .obs import Obs
+from .evals import Case, Report, evaluate
 from .libraries import Library, library
+from .rerank import Reranker
+from .sessions import Session, session
 from .topics import Topic, topic
 
-__all__ = ["Memory", "Hit", "Embedder", "EmbedderError", "Obs", "topic", "Topic", "library", "Library"]
+__all__ = ["Memory", "Hit", "Embedder", "EmbedderError", "Obs", "topic", "Topic", "library", "Library", "evaluate", "Case", "Report", "Reranker", "session", "Session"]
 __version__ = "0.1.0"
