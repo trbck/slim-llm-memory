@@ -5,33 +5,33 @@
   "project_name": "slim-llm-memory",
   "goal": "Reranking that costs nothing on easy queries \u2014 run the cross-encoder only when the top of the ranking is actually contested.",
   "started_at": "2026-09-04T15:05:40Z",
-  "updated_at": "2026-09-04T15:08:05Z",
-  "status": "idle",
-  "iteration": "M1#1",
+  "updated_at": "2026-09-04T15:31:51Z",
+  "status": "done",
+  "iteration": "M5#1",
   "goal_progress": {
-    "green": 0,
+    "green": 5,
     "total": 5
   },
   "checkboxes": [
     {
-      "done": false,
-      "text": "`should_rerank(scores, margin)` decides from the top-two gap relative to the pool spread {#M1}"
+      "done": true,
+      "text": "`should_rerank(scores, margin)` decides from the top-two gap relative to the pool spread \u2014 EVIDENCE: `/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_should_rerank_uses_relative_gap` -> exit 0 | 2026-09-04 | auto {#M1}"
     },
     {
-      "done": false,
-      "text": "`Reranker.cross_encoder` accepts and uses `max_length` (default 256) and `batch_size` (default 32) {#M2}"
+      "done": true,
+      "text": "`Reranker.cross_encoder` accepts and uses `max_length` (default 256) and `batch_size` (default 32) \u2014 EVIDENCE: `/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_cross_encoder_passes_max_length_and_batch_size` -> exit 0 | 2026-09-04 | auto {#M2}"
     },
     {
-      "done": false,
-      "text": "`Topic.ask(rerank=rr, rerank_margin=m)` skips the reranker when the leader is clear, and says so {#M3}"
+      "done": true,
+      "text": "`Topic.ask(rerank=rr, rerank_margin=m)` skips the reranker when the leader is clear, and says so \u2014 EVIDENCE: `/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py -k topic_auto` -> exit 0 | 2026-09-04 | auto {#M3}"
     },
     {
-      "done": false,
-      "text": "`Library.ask` supports the same adaptive policy {#M4}"
+      "done": true,
+      "text": "`Library.ask` supports the same adaptive policy \u2014 EVIDENCE: `/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_library_auto_matches_topic` -> exit 0 | 2026-09-04 | auto {#M4}"
     },
     {
-      "done": false,
-      "text": "`examples/04_rerank_bench.py` reports MRR, reranker calls and latency for off / auto / always {#M5}"
+      "done": true,
+      "text": "`examples/04_rerank_bench.py` reports MRR, reranker calls and latency for off / auto / always \u2014 EVIDENCE: `/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_bench_offline_reports_three_policies` -> exit 0 | 2026-09-04 | auto {#M5}"
     }
   ],
   "milestones": [
@@ -43,8 +43,8 @@
       "must_have": true,
       "after": [],
       "attempts": 1,
-      "result": "FAIL",
-      "counterexample": "AUDIT: write under protected path: tests/test_rerank_auto.py; monkey-patching in tests/test_rerank_auto.py: +def test_cross_encoder_passes_max_length_and_batch_size(monkeypatch):; monkey-patching in tests/test_rerank_auto.py: +    monkeypat",
+      "result": "PASS",
+      "counterexample": "",
       "spend_usd": 0.1
     },
     {
@@ -54,10 +54,10 @@
       "kind": "test",
       "must_have": true,
       "after": [],
-      "attempts": 0,
-      "result": "-",
+      "attempts": 1,
+      "result": "PASS",
       "counterexample": "",
-      "spend_usd": 0
+      "spend_usd": 0.1
     },
     {
       "id": "M3",
@@ -68,10 +68,10 @@
       "after": [
         "M1"
       ],
-      "attempts": 0,
-      "result": "-",
+      "attempts": 1,
+      "result": "PASS",
       "counterexample": "",
-      "spend_usd": 0
+      "spend_usd": 0.2
     },
     {
       "id": "M4",
@@ -82,10 +82,10 @@
       "after": [
         "M3"
       ],
-      "attempts": 0,
-      "result": "-",
+      "attempts": 1,
+      "result": "PASS",
       "counterexample": "",
-      "spend_usd": 0
+      "spend_usd": 0.2
     },
     {
       "id": "M5",
@@ -96,16 +96,96 @@
       "after": [
         "M4"
       ],
-      "attempts": 0,
-      "result": "-",
+      "attempts": 1,
+      "result": "PASS",
       "counterexample": "",
-      "spend_usd": 0
+      "spend_usd": 0.25
     }
   ],
   "tickets": [],
   "decisions": [],
   "blockers": [],
   "events": [
+    {
+      "ts": "2026-09-04T15:31:51Z",
+      "kind": "boil.score",
+      "ticket": "M5",
+      "attempt": 1,
+      "status": "PASS",
+      "detail": "EVIDENCE: `/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_bench_offline_reports_three_policies` -> exit 0 | 2026-09-04 | auto"
+    },
+    {
+      "ts": "2026-09-04T15:27:25Z",
+      "kind": "boil.prepare",
+      "ticket": "M5",
+      "attempt": 1,
+      "status": "dispatch",
+      "detail": "examples/04_rerank_bench.py reports MRR, reranker calls and latency for off / auto / always"
+    },
+    {
+      "ts": "2026-09-04T15:27:12Z",
+      "kind": "boil.score",
+      "ticket": "M4",
+      "attempt": 1,
+      "status": "PASS",
+      "detail": "EVIDENCE: `/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_library_auto_matches_topic` -> exit 0 | 2026-09-04 | auto"
+    },
+    {
+      "ts": "2026-09-04T15:20:54Z",
+      "kind": "boil.prepare",
+      "ticket": "M4",
+      "attempt": 1,
+      "status": "dispatch",
+      "detail": "Library.ask supports the same adaptive policy"
+    },
+    {
+      "ts": "2026-09-04T15:20:42Z",
+      "kind": "boil.score",
+      "ticket": "M3",
+      "attempt": 1,
+      "status": "PASS",
+      "detail": "EVIDENCE: `/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py -k topic_auto` -> exit 0 | 2026-09-04 | auto"
+    },
+    {
+      "ts": "2026-09-04T15:11:33Z",
+      "kind": "boil.prepare",
+      "ticket": "M3",
+      "attempt": 1,
+      "status": "dispatch",
+      "detail": "Topic.ask(rerank=rr, rerank_margin=m) skips the reranker when the leader is clear, and says so"
+    },
+    {
+      "ts": "2026-09-04T15:11:22Z",
+      "kind": "boil.score",
+      "ticket": "M2",
+      "attempt": 1,
+      "status": "PASS",
+      "detail": "EVIDENCE: `/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_cross_encoder_passes_max_length_and_batch_size` -> exit 0 | 2026-09-04 | auto"
+    },
+    {
+      "ts": "2026-09-04T15:09:59Z",
+      "kind": "boil.prepare",
+      "ticket": "M2",
+      "attempt": 1,
+      "status": "dispatch",
+      "detail": "Reranker.cross_encoder accepts and uses max_length (default 256) and batch_size (default 32)"
+    },
+    {
+      "ts": "2026-09-04T15:09:46Z",
+      "kind": "boil.score",
+      "ticket": "M1",
+      "attempt": 1,
+      "status": "PASS",
+      "detail": "EVIDENCE: `/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_should_rerank_uses_relative_gap` -> exit 0 | 2026-09-04 | auto"
+    },
+    {
+      "ts": "2026-09-04T15:09:38Z",
+      "kind": "boil.prepare",
+      "ticket": "M1",
+      "attempt": 1,
+      "status": "dispatch",
+      "detail": "should_rerank(scores, margin) decides from the top-two gap relative to the pool spread"
+    },
     {
       "ts": "2026-09-04T15:08:05Z",
       "kind": "boil.score",
@@ -126,7 +206,7 @@
   "demo": "",
   "counts": {
     "milestones": 5,
-    "milestones_green": 0,
+    "milestones_green": 5,
     "tickets": 0,
     "open": 0,
     "in_progress": 0,

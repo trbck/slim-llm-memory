@@ -1,5 +1,5 @@
 {
- "compiled_at": "2026-09-04T15:05:28Z",
+ "compiled_at": "2026-09-04T15:09:10Z",
  "budget_usd": 5.0,
  "cap": 4,
  "stall": 2,
@@ -20,7 +20,7 @@
    "hash": "8919a8eb820193e8",
    "baseline": "falsifiable",
    "counterexample_at_compile": "ERROR: found no collectors for /home/trbck/workspace/slim-llm-memory/tests/test_rerank_auto.py::test_should_rerank_uses_relative_gap",
-   "frozen_at": "2026-09-04T15:05:29Z",
+   "frozen_at": "2026-09-04T15:09:13Z",
    "timeout": 300
   },
   {
@@ -38,7 +38,7 @@
    "hash": "086164397b6de8a2",
    "baseline": "falsifiable",
    "counterexample_at_compile": "ERROR: found no collectors for /home/trbck/workspace/slim-llm-memory/tests/test_rerank_auto.py::test_cross_encoder_passes_max_length_and_batch_size",
-   "frozen_at": "2026-09-04T15:05:30Z",
+   "frozen_at": "2026-09-04T15:09:17Z",
    "timeout": 300
   },
   {
@@ -58,7 +58,7 @@
    "hash": "511e4296cbcbf847",
    "baseline": "falsifiable",
    "counterexample_at_compile": "Traceback:",
-   "frozen_at": "2026-09-04T15:05:31Z",
+   "frozen_at": "2026-09-04T15:09:20Z",
    "timeout": 300
   },
   {
@@ -78,7 +78,7 @@
    "hash": "332f515ce42eff01",
    "baseline": "falsifiable",
    "counterexample_at_compile": "ERROR: found no collectors for /home/trbck/workspace/slim-llm-memory/tests/test_rerank_auto.py::test_library_auto_matches_topic",
-   "frozen_at": "2026-09-04T15:05:32Z",
+   "frozen_at": "2026-09-04T15:09:24Z",
    "timeout": 300
   },
   {
@@ -98,7 +98,7 @@
    "hash": "f03fa88fe6e810c0",
    "baseline": "falsifiable",
    "counterexample_at_compile": "ERROR: found no collectors for /home/trbck/workspace/slim-llm-memory/tests/test_rerank_auto.py::test_bench_offline_reports_three_policies",
-   "frozen_at": "2026-09-04T15:05:33Z",
+   "frozen_at": "2026-09-04T15:09:26Z",
    "timeout": 300
   }
  ],
@@ -106,5 +106,5 @@
   "enabled": false,
   "reasoning": "5 small additions to code this session authored and tested; the frozen checks plus the 161-test suite are the gate"
  },
- "base_sha": "f1f3507ca7d62aca44435fd0bf392dee192c6d11"
+ "base_sha": "d8d04bdebb7cc96dd5a5cf515389a9475e5aea88"
 }

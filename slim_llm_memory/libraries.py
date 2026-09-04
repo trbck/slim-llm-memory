@@ -39,7 +39,7 @@ import numpy as np
 from .embed import Embedder
 from .index import Hit, _normalise
 from .llm import grounded_answer
-from .rerank import Reranker, resolve as resolve_reranker
+from .rerank import RERANK_MARGIN, Reranker, resolve as resolve_reranker, should_rerank
 from .sessions import Session
 from .topics import (DEFAULT_HOME, DEFAULT_OLLAMA, Cand, Result, Topic, _make_embedder, _slug, apply_reranker,
                      fuse, has_entity, topic as _open_topic)
@@ -341,7 +341,9 @@ class Library:
     def ask(self, prompt: str, k: int = 5, *, topics: "Iterable[str] | None" = None,
             include_archived: bool = False, min_score: float = 0.3, max_words: int = 600,
             route: "bool | int | str" = "auto", mode: str = "hybrid",
-            rerank: "bool | Reranker | None" = None, entity: "str | None" = None) -> Result:
+            rerank: "bool | str | Reranker | None" = None,
+            rerank_margin: "float | None" = None,
+            entity: "str | None" = None) -> Result:
         """Embed once, then find the best chunks across topics.
 
         ``route``:
@@ -351,11 +353,17 @@ class Library:
           * ``"auto"`` — exact while the library holds ≤ ROUTE_AUTO_THRESHOLD chunks, else two-stage.
 
         ``mode`` is ``"hybrid"`` (dense ∪ BM25, default), ``"dense"`` or ``"keyword"`` — see
-        ``Topic.ask``. Hits carry ``meta["topic"]`` and ids prefixed ``topic/``. ``r.routed``
-        lists the topics scanned (``None`` when exact), ``r.per_topic_ms`` the per-store time.
+        ``Topic.ask``. ``rerank_margin=<float>`` is the same adaptive policy as ``Topic.ask``:
+        the decision is made once over the merged candidate pool of every scanned topic, so a
+        query that is decisive library-wide skips the reranker entirely. ``rerank="auto"`` is
+        sugar for the default cross-encoder + ``RERANK_MARGIN``. Hits carry ``meta["topic"]``
+        and ids prefixed ``topic/``. ``r.routed`` lists the topics scanned (``None`` when
+        exact), ``r.per_topic_ms`` the per-store time.
         """
         cands = self._candidates(topics, include_archived)
         rr = resolve_reranker(rerank)
+        if rr is not None and rerank_margin is None and rerank == "auto":
+            rerank_margin = RERANK_MARGIN
         t0 = time.perf_counter()
         qv = _normalise(np.asarray(self.embedder.embed([prompt])[0], dtype=np.float32))
         t1 = time.perf_counter()
@@ -373,27 +381,38 @@ class Library:
         routed = None
         route_ms = 0.0
         per_topic: dict[str, float] = {}
+        rerank_skipped = False
         if use_route:
             r0 = time.perf_counter()
             _, chosen = self._route_vec(qv, cands, m, ROUTE_MARGIN, ROUTE_MIN_SCORE)
             route_ms = (time.perf_counter() - r0) * 1000
             routed = [t.name for t, _ in chosen]
-            hits = self._merge(qv, prompt, chosen, k, mode, min_score, per_topic, rr, entity)
+            hits, rr_used, rerank_skipped = self._merge(qv, prompt, chosen, k, mode, min_score, per_topic,
+                                                          rr, rerank_margin, entity)
         elif mode == "dense" and rr is None and entity is None:
-            hits = self._scan_flat(qv, cands, k, min_score)
+            hits, rr_used = self._scan_flat(qv, cands, k, min_score), None
         else:
-            hits = self._merge(qv, prompt, cands, k, mode, min_score, per_topic, rr, entity)
+            hits, rr_used, rerank_skipped = self._merge(qv, prompt, cands, k, mode, min_score, per_topic,
+                                                          rr, rerank_margin, entity)
         t2 = time.perf_counter()
 
         r = Result(prompt, hits, (t1 - t0) * 1000, (t2 - t1) * 1000 - route_ms, max_words)
-        r.mode, r.reranked = mode, (rr.name if rr else None)
+        r.mode, r.reranked = mode, (rr_used.name if rr_used else None)
+        r.rerank_skipped = rerank_skipped
         r.routed, r.routed_of, r.route_ms, r.per_topic_ms = routed, len(cands), route_ms, per_topic
         return r
 
     def _merge(self, qv: np.ndarray, prompt: str, cands: list[tuple[Topic, bool]], k: int, mode: str,
                min_score: float, per_topic: dict[str, float], rr: "Reranker | None",
-               entity: "str | None" = None) -> list[Hit]:
-        """Candidates from every topic, fused ONCE over the union so scores compare across topics."""
+               rerank_margin: "float | None" = None,
+               entity: "str | None" = None) -> tuple[list[Hit], "Reranker | None", bool]:
+        """Candidates from every topic, fused ONCE over the union so scores compare across topics.
+
+        The rerank decision (see ``rerank.should_rerank``) is made once here, over that merged
+        pool, so a query that is decisive library-wide never pays for a reranker call — mirrors
+        ``Topic.ask``. Returns the hits, the reranker actually used (``None`` if skipped or
+        absent), and whether the adaptive policy declined an available reranker.
+        """
         pool = max(20, 4 * k)
         allc: list[Cand] = []
         archived_of: dict[int, bool] = {}
@@ -406,10 +425,15 @@ class Library:
         ranked = fuse(allc, mode)
         if entity:
             ranked = [(c, sc) for c, sc in ranked if has_entity(c.topic.memory.store.items[c.idx].meta, entity)]
+        rerank_skipped = False
+        if rr is not None and rerank_margin is not None:
+            if not should_rerank([sc for _, sc in ranked], rerank_margin):
+                rerank_skipped = True
+                rr = None
         hits = [self._label(c.topic, archived_of[id(c.topic)], c.topic._hit(c)) for c, _ in ranked[: (pool if rr else k)]]
         if rr and hits:
             hits = apply_reranker(rr, prompt, hits, k)
-        return hits
+        return hits, rr, rerank_skipped
 
     def answer(self, question: str, model: str = "llama3.2:3b", k: int = 4, *, mode: str = "hybrid",
                rerank: "bool | Reranker | None" = None, min_score: float = 0.3, rewrite: bool = False,

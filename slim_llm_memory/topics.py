@@ -32,7 +32,7 @@ from .enrich import extract as _extract
 from .graph import Graph, wikilinks
 from .keyword import BM25, rrf
 from .llm import Answer, grounded_answer
-from .rerank import Reranker
+from .rerank import RERANK_MARGIN, Reranker, should_rerank
 from .rerank import resolve as resolve_reranker
 from .store import StoreError
 
@@ -116,6 +116,7 @@ class Result:
         self.mode: str = "dense"
         self.reranked: str | None = None
         self.rerank_ms: float = 0.0
+        self.rerank_skipped: bool = False
         self.routed: list[str] | None = None
         self.routed_of: int = 0
         self.route_ms: float = 0.0
@@ -163,6 +164,8 @@ class Result:
             head += f" · routed to {len(self.routed)}/{self.routed_of} topics in {self.route_ms:.2f} ms"
         if self.reranked:
             head += f" · reranked ({self.reranked}) in {self.rerank_ms:.0f} ms"
+        elif self.rerank_skipped:
+            head += " · rerank skipped"
         rows = [f"  {n:>2}  {h.score:.2f}  {h.id:<24} {' '.join(h.text.split())[:62]}  [{h.meta.get('via', '')}]"
                 for n, h in enumerate(self.hits, start=1)]
         return "\n".join([head, *rows])
@@ -587,7 +590,9 @@ class Topic:
         via = "both" if (c.in_dense and c.in_kw) else ("dense" if c.in_dense else "keyword")
         return Hit(id=it.id, score=c.cos, text=it.text, meta=dict(it.meta, via=via))
 
-    def ask(self, prompt: str, k: int = 4, *, mode: str = "hybrid", rerank: "bool | Reranker | None" = None,
+    def ask(self, prompt: str, k: int = 4, *, mode: str = "hybrid",
+            rerank: "bool | str | Reranker | None" = None,
+            rerank_margin: "float | None" = None,
             min_score: float = 0.3, max_words: int = 600, entity: "str | None" = None) -> Result:
         """Top-``k`` chunks for ``prompt``: one embedding call, then
 
@@ -595,6 +600,9 @@ class Topic:
           meaning *and* exact tokens (names, numbers, file names);
         * ``mode="dense"``: cosine only; ``mode="keyword"``: BM25 only;
         * ``rerank=True`` (or a ``Reranker``): a cross-encoder re-scores the top 4·k candidates.
+        * ``rerank_margin=<float>``: adaptive — skip the reranker entirely when the fused
+          leader is already clear of the field (see ``rerank.should_rerank``).
+          ``rerank="auto"`` is sugar for the default cross-encoder + ``RERANK_MARGIN``.
 
         Each hit's ``meta["via"]`` says which leg(s) found it; ``meta["rerank"]`` the reranker score.
         ``entity="Postgres"`` keeps only chunks whose extracted entities include it (see ``add(enrich=)``).
@@ -603,10 +611,17 @@ class Topic:
         qv = _normalise(np.asarray(self.memory.embedder.embed([prompt])[0], dtype=np.float32))
         t1 = time.perf_counter()
         rr = resolve_reranker(rerank)
+        if rr is not None and rerank_margin is None and rerank == "auto":
+            rerank_margin = RERANK_MARGIN
         pool = max(20, 4 * k)
         ranked = fuse(self._candidates(qv, prompt, pool, mode, min_score), mode)
         if entity:
             ranked = [(c, sc) for c, sc in ranked if has_entity(c.topic.memory.store.items[c.idx].meta, entity)]
+        rerank_skipped = False
+        if rr is not None and rerank_margin is not None:
+            if not should_rerank([sc for _, sc in ranked], rerank_margin):
+                rerank_skipped = True
+                rr = None
         hits = [c.topic._hit(c) for c, _ in ranked[: (pool if rr else k)]]
         rr_ms = 0.0
         if rr and hits:
@@ -616,6 +631,7 @@ class Topic:
         t2 = time.perf_counter()
         r = Result(prompt, hits, (t1 - t0) * 1000, (t2 - t1) * 1000 - rr_ms, max_words)
         r.mode, r.reranked, r.rerank_ms = mode, (rr.name if rr else None), rr_ms
+        r.rerank_skipped = rerank_skipped
         return r
 
     def answer(self, question: str, model: str = "llama3.2:3b", k: int = 4, *, mode: str = "hybrid",

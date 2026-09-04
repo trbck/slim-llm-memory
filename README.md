@@ -164,6 +164,8 @@ numbers: at 500 topics × 200 chunks, routing cuts the scan from ~40 ms to ~2 ms
 t.ask(q)                                    # hybrid (default): dense cosine ∪ BM25, fused by normalised score
 t.ask(q, mode="dense") / t.ask(q, mode="keyword")
 t.ask(q, rerank=True)                       # cross-encoder over the top 4·k  (pip install slim-llm-memory[rerank])
+t.ask(q, rerank="auto")                     # ...but only when the top of the ranking is actually contested
+t.ask(q, rerank=rr, rerank_margin=0.15)     # same policy with your own reranker; r.rerank_skipped says what happened
 t.answer(q, rewrite=True, refuse_below=0.4, stream=False)   # query rewrite, refusal, validated [n] citations
 
 from slim_llm_memory import evaluate
@@ -183,6 +185,24 @@ measured over this repo's own docs:
 Chunks are heading-aware with a 20-word overlap (`topic(..., chunk_words=120,
 overlap=20)`); a tuning grid over chunk size, overlap and the fusion weight is
 in the notebook and confirms the defaults. Re-tune per corpus with `evaluate()`.
+
+Reranking is the most accurate and by far the slowest step, so `rerank="auto"`
+pays for it only when the top of the ranking is contested: it compares the
+leader's lead over the runner-up against the pool's spread, and skips the model
+when that relative gap is at least `rerank_margin` (default 0.15).
+`examples/04_rerank_bench.py` measures the trade on a 14-document corpus and 10
+questions — with the real embedder and `bge-reranker-v2-m3` on this CPU box:
+
+| policy | MRR | hit@1 | reranker calls | ms/query |
+|---|---|---|---|---|
+| off | 1.00 | 1.00 | 0 | 447 |
+| auto | 1.00 | 1.00 | 0 of 10 | 749 |
+| always | 1.00 | 1.00 | 10 | 3622 |
+
+Same answers, 4.8× faster than reranking everything. On a harder corpus (the
+`--offline` run, where dense retrieval alone gets one question wrong) auto
+reranks 3 of 10 questions and recovers the full MRR that `always` reaches.
+`r.rerank_skipped` reports the decision per query.
 
 ### Structure: graph, entities, sessions
 

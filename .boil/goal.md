@@ -3,11 +3,11 @@
 **One-line:** Reranking that costs nothing on easy queries — run the cross-encoder only when the top of the ranking is actually contested.
 
 ## Success checklist
-- [ ] `should_rerank(scores, margin)` decides from the top-two gap relative to the pool spread {#M1}
-- [ ] `Reranker.cross_encoder` accepts and uses `max_length` (default 256) and `batch_size` (default 32) {#M2}
-- [ ] `Topic.ask(rerank=rr, rerank_margin=m)` skips the reranker when the leader is clear, and says so {#M3}
-- [ ] `Library.ask` supports the same adaptive policy {#M4}
-- [ ] `examples/04_rerank_bench.py` reports MRR, reranker calls and latency for off / auto / always {#M5}
+- [x] `should_rerank(scores, margin)` decides from the top-two gap relative to the pool spread — EVIDENCE: `/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_should_rerank_uses_relative_gap` -> exit 0 | 2026-09-04 | auto {#M1}
+- [x] `Reranker.cross_encoder` accepts and uses `max_length` (default 256) and `batch_size` (default 32) — EVIDENCE: `/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_cross_encoder_passes_max_length_and_batch_size` -> exit 0 | 2026-09-04 | auto {#M2}
+- [x] `Topic.ask(rerank=rr, rerank_margin=m)` skips the reranker when the leader is clear, and says so — EVIDENCE: `/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py -k topic_auto` -> exit 0 | 2026-09-04 | auto {#M3}
+- [x] `Library.ask` supports the same adaptive policy — EVIDENCE: `/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_library_auto_matches_topic` -> exit 0 | 2026-09-04 | auto {#M4}
+- [x] `examples/04_rerank_bench.py` reports MRR, reranker calls and latency for off / auto / always — EVIDENCE: `/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q tests/test_rerank_auto.py::test_bench_offline_reports_three_policies` -> exit 0 | 2026-09-04 | auto {#M5}
 
 ## Requirements understanding
 
