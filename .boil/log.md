@@ -17,3 +17,27 @@ hashes, new baseline). Next time: author → compile → **commit** → wire the
 
 Next goal candidate: `auto` costs ~300 ms more than `off` because it still fetches the 4·k
 pool before deciding. Worth measuring whether the pool can be sized lazily.
+
+## 2026-09-09 — charter + ladder (governance)
+
+Goal 1 closed: `boil-doctor.py --final` -> FINAL OK, 5/5 boxes with fresh EVIDENCE.
+
+Wrote `.boil/charter.md` and `.boil/ladder.md`, clearing the UNGOVERNED flag. Track is
+**life first, revisit business at L3**; north star is retrieval quality vs. plain BM25 on a
+*real* corpus at bounded latency (currently negative — advisor's BM25 wins, ~1600x faster);
+status `candidate` (workspace WIP already 5/3); kill_by 2026-12-09.
+
+Ladder: 6 criteria ticked from fresh runs — L0 both, L1 core loop (real Ollama + llama3.2:3b,
+grounded answer with citation `[4]`, 127 s), L2 suite green (167 passed), bench, no data-loss bug.
+
+Three findings from the verification pass, all pointing the same way:
+1. **Nothing in the workspace imports `slim_llm_memory`.** 29 commits/30 days, zero consumers.
+2. **The package is not installed** — `pip show slim-llm-memory` finds nothing, and
+   `import slim_llm_memory` fails outside the repo root. Every demo needs `PYTHONPATH=.`,
+   so the README's own 30-second tour cannot run as written. This is the mechanical reason
+   for finding 1.
+3. **README is stale**: claims "44 tests", actual count is 167.
+
+Next goal candidate (ahead of the earlier lazy-pool idea): make the thing installable and
+integrate it into one real project — that is the L2 blocker and the north star needs a real
+corpus to be measured on anyway.
