@@ -20,12 +20,12 @@ replaces the life block only when L3 is green. -->
 - [ ] I used it for its REAL purpose >=3 times within one week
 - [ ] North star measured on >=1 real corpus, honestly, number written down even if negative
 - [x] The retrieval stack is benchmarked, not guessed: MRR, calls and latency per policy — EVIDENCE: `PYTHONPATH=. python examples/04_rerank_bench.py --offline --json` -> off MRR 0.933 / 0 calls, auto MRR 1.000 / 3 calls, always MRR 1.000 / 10 calls | 2026-09-09 | auto
-- [x] Full test suite green — EVIDENCE: `/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q` -> exit 0, 167 passed | 2026-09-09 | auto
+- [x] Full test suite green — EVIDENCE: `/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q` -> exit 0, 169 passed | 2026-09-09 | auto
 - [x] No data-loss or corrupting bug open — EVIDENCE: `pytest -q tests/test_store.py tests/test_index.py` -> exit 0, 33 passed (covers the 2026-09-03 lock-leak / O(N^2) upsert / theta=1.0 dedup regressions, fixed on main in 7488914); `.boil/bugs.md` empty | 2026-09-09 | auto
 - [ ] Setup from scratch documented and re-tested
 
 ## L3 — Survives a stranger
-- [ ] Installable without me: `pip install .` into a clean env, import works
+- [x] Installable without me: `pip install .` into a clean env, import works — EVIDENCE: `pip wheel --no-deps .` then `pip install` into a fresh venv -> `import slim_llm_memory` OK 0.1.0, README tour runs; wheel carries all 22 modules incl. `apps.obsidian` | 2026-09-09 | auto
 - [ ] Survives process restart with zero data loss (atomic flush + lock, verified)
 - [ ] Errors handled: Ollama down, empty store, bad input — no raw traceback reaches the caller
 - [ ] A stranger onboards from the README alone — fresh-eyes run (person or clean-env agent)
