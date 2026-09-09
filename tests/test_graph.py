@@ -2,6 +2,10 @@ from pathlib import Path
 
 import pytest
 
+# networkx ships in the optional [graph] extra. Without this guard the whole
+# module fails on a plain `pip install .[test]`, which is what a stranger runs.
+pytest.importorskip("networkx", reason="pip install slim-llm-memory[graph]")
+
 from slim_llm_memory.graph import Graph, wikilinks
 
 

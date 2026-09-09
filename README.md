@@ -24,10 +24,24 @@ one file.
 ## Install
 
 ```bash
-pip install slim-llm-memory          # numpy + httpx only
-pip install slim-llm-memory[gemini]  # + Gemini cloud embedder (phase 2)
-pip install slim-llm-memory[graph]   # + NetworkX graph layer (phase 4)
+pip install slim-llm-memory           # numpy + httpx only
+pip install slim-llm-memory[graph]    # + NetworkX graph layer
+pip install slim-llm-memory[rerank]   # + sentence-transformers cross-encoder
 ```
+
+Working on the library itself:
+
+```bash
+pip install -e .                      # then `import slim_llm_memory` works anywhere
+```
+
+Install it even for local hacking. Running from the repo root with `PYTHONPATH=.`
+works, but it hides packaging bugs — a broken console-script entry survived exactly
+that way until the package was first installed for real.
+
+The `[gemini]` and `[anthropic]` extras are declared but **not yet implemented**:
+no module imports them. `Embedder` currently offers `noop` and `ollama`, and the
+answer path talks only to Ollama.
 
 ## 30-second tour
 
@@ -244,12 +258,27 @@ PYTHONPATH=. python examples/02_topic_context.py --fresh                  # cold
 PYTHONPATH=. python examples/02_topic_context.py --llm llama3.2:3b        # + grounded answer
 ```
 
-## Tests + example
+## Tests + examples
 
 ```bash
-pytest                              # 44 tests, ~1.2 s, no network
-PYTHONPATH=. python examples/01_minimal.py
+pytest                              # 169 tests, no network (Embedder.noop)
+python examples/01_minimal.py       # after `pip install -e .`
 ```
+
+### Notebooks
+
+Start with the four `hello` notebooks — each is about ten lines and answers one
+question. They need Ollama running with `nomic-embed-text` pulled.
+
+| Notebook | Shows |
+|---|---|
+| `notebooks/00_hello_topic.ipynb`   | the three verbs: `topic()` / `.add()` / `.ask()` |
+| `notebooks/01_hello_library.ipynb` | many topics behind one handle, and `route()` |
+| `notebooks/02_hello_memory.ipynb`  | the low-level `Memory` API this tour uses |
+| `notebooks/03_hello_answer.ipynb`  | a grounded answer with citations, and refusal |
+
+The longer notebooks (`topic_context_demo`, `library_demo`, `accuracy_demo`,
+`use_cases_demo`) go deeper on measurement.
 
 ## Migration paths
 

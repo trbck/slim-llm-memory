@@ -21,3 +21,4 @@ htmlcov/
 .usecases_nb/
 .accuracy_nb/
 .accuracy_nb_ml/
+.hello_nb/

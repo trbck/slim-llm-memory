@@ -1,5 +1,11 @@
 from pathlib import Path
 
+import pytest
+
+# pyyaml ships in the optional [obsidian] extra. Without this guard the whole
+# module fails on a plain `pip install .[test]`, which is what a stranger runs.
+pytest.importorskip("yaml", reason="pip install slim-llm-memory[obsidian]")
+
 from slim_llm_memory.apps.obsidian.parser import (
     Chunk, is_vault_markdown, parse_file, parse_text, rel_path,
 )

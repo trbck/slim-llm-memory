@@ -1,5 +1,6 @@
 """Enrichment (mocked model) and sessions — offline."""
 
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,8 @@ def fake_extract(model, text, *, url, timeout=600.0):
 fake_extract.calls = []
 
 
+@pytest.mark.skipif(importlib.util.find_spec("networkx") is None,
+                    reason="pip install slim-llm-memory[graph]")
 def test_add_enrich_sets_entities_edges_and_filters(tmp_path: Path, monkeypatch):
     import slim_llm_memory.topics as T
     monkeypatch.setattr(T, "_extract", fake_extract)

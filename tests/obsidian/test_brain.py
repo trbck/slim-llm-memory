@@ -3,7 +3,12 @@ import time
 from pathlib import Path
 
 import pytest
-import yaml
+
+# pyyaml ships in the optional [obsidian] extra, and the library only imports it
+# lazily inside the functions that need it. Importing it at test-module scope made
+# `pip install .[test] && pytest` abort during collection — zero tests run — for
+# anyone whose environment did not happen to have pyyaml already.
+yaml = pytest.importorskip("yaml", reason="pip install slim-llm-memory[obsidian]")
 
 from slim_llm_memory import EmbedderError, Embedder, Memory
 from slim_llm_memory.apps.obsidian.brain import Brain, BrainError
