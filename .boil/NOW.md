@@ -1,7 +1,7 @@
 # NOW — slim-llm-memory
 
 **Project:** candidate · stage L0 · north star: MRR@10 margin over plain BM25 on a real corpus, at acceptable latency
-**Ladder:** 6/24 criteria green · next open: The demo is repeatable from a clean checkout and documented in the README
+**Ladder:** 9/24 criteria green · next open: `.boil/` governance pointer added to CLAUDE.md
 **Goal:** 5/5 checkboxes — Reranking that costs nothing on easy queries — run the cross-encoder only when the top of the ranking is actually contested.
 **Measured:** milestones 5/5 green | delta 0 | current - (done) | spent $0.85/$5.00
 **Loop:** 6 iterations · 0 actionable tickets

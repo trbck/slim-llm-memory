@@ -12,7 +12,7 @@ replaces the life block only when L3 is green. -->
 
 ## L1 — Skeleton (core loop works once)
 - [x] Core loop end-to-end on dev machine: `topic()` -> `add` -> `ask` returns a grounded, cited answer — EVIDENCE: `PYTHONPATH=. python examples/02_topic_context.py --llm llama3.2:3b` -> exit 0; hybrid retrieval over real Ollama `nomic-embed-text`, then a grounded answer carrying citation `[4]` (127.0 s on CPU) | 2026-09-09 | auto
-- [ ] The demo is repeatable from a clean checkout and documented in the README
+- [x] The demo is repeatable from a clean checkout and documented in the README — EVIDENCE: `git clone` to a temp dir -> fresh venv -> `pip install -e .[test]` -> `pytest` = exit 0, 138 passed / 4 skipped (each skip names its extra); README documents `pip install -e .` and the four hello notebooks | 2026-09-09 | auto
 - [ ] `.boil/` governance pointer added to CLAUDE.md
 
 ## L2 — Usable by me
@@ -20,9 +20,9 @@ replaces the life block only when L3 is green. -->
 - [ ] I used it for its REAL purpose >=3 times within one week
 - [ ] North star measured on >=1 real corpus, honestly, number written down even if negative
 - [x] The retrieval stack is benchmarked, not guessed: MRR, calls and latency per policy — EVIDENCE: `PYTHONPATH=. python examples/04_rerank_bench.py --offline --json` -> off MRR 0.933 / 0 calls, auto MRR 1.000 / 3 calls, always MRR 1.000 / 10 calls | 2026-09-09 | auto
-- [x] Full test suite green — EVIDENCE: `/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q` -> exit 0, 169 passed | 2026-09-09 | auto
+- [x] Full test suite green — EVIDENCE: `/home/trbck/miniconda3/envs/trading/bin/python -m pytest -q` -> exit 0, 169 passed / 0 skipped with every extra present | 2026-09-09 | auto
 - [x] No data-loss or corrupting bug open — EVIDENCE: `pytest -q tests/test_store.py tests/test_index.py` -> exit 0, 33 passed (covers the 2026-09-03 lock-leak / O(N^2) upsert / theta=1.0 dedup regressions, fixed on main in 7488914); `.boil/bugs.md` empty | 2026-09-09 | auto
-- [ ] Setup from scratch documented and re-tested
+- [x] Setup from scratch documented and re-tested — EVIDENCE: same clean-clone run; `cd /tmp && python examples/01_minimal.py` -> exit 0 with no PYTHONPATH | 2026-09-09 | auto
 
 ## L3 — Survives a stranger
 - [x] Installable without me: `pip install .` into a clean env, import works — EVIDENCE: `pip wheel --no-deps .` then `pip install` into a fresh venv -> `import slim_llm_memory` OK 0.1.0, README tour runs; wheel carries all 22 modules incl. `apps.obsidian` | 2026-09-09 | auto
