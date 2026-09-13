@@ -23,4 +23,4 @@ from .sessions import Session, session
 from .topics import Topic, topic
 
 __all__ = ["Memory", "Hit", "Embedder", "EmbedderError", "Obs", "topic", "Topic", "library", "Library", "evaluate", "Case", "Report", "Reranker", "session", "Session"]
-__version__ = "0.1.0"
+__version__ = "0.1.1"

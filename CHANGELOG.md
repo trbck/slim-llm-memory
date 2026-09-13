@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 — 2026-09-13
 
 - Fix: `Topic.add()` raised `ImportError` on a plain install (no `[graph]` extra) when a
   document contained a `[[wikilink]]` to another document in the store. The documents were
