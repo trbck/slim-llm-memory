@@ -1,305 +1,197 @@
 # slim-llm-memory
 
-Slim, fast, persistent **memory + retrieval for LLM apps**. Pure Python
-where possible; numpy where it actually helps. Ollama for local
-embeddings; cloud LLMs only for hard reasoning. ~1000 LOC, two hard
-deps (numpy + httpx), drops into anything.
+Local memory and retrieval for LLM apps. Put your notes or docs into a store, ask a
+question, and get back the passages to paste into a prompt, or a cited answer from a
+local model.
 
-> **Status:** phase 1 — `Memory` core. See [`docs/IMPLEMENTATION.md`](docs/IMPLEMENTATION.md)
-> for the full plan and what comes next (Gemini fallback, Tier router,
-> Graph layer, ANN swap).
-
-## Why
-
-Vector DBs and full RAG frameworks are overkill for personal projects
-and research code. At < 50k items, a single numpy array, a jsonl file,
-and a content-hash for incremental updates is all you actually need.
-This library is exactly that — but written carefully enough that you
-can build serious things on it without hitting sharp corners.
-
-When you outgrow it, the public API is **swap-compatible** with a real
-vector store (faiss / SQLite-vss / Qdrant). The migration is local to
-one file.
+It needs only numpy and httpx. Embeddings come from [Ollama](https://ollama.com) on your
+own machine. It is meant for personal projects and research code, up to about 50,000
+passages per store, where one numpy array is fast enough and a vector database is
+extra work.
 
 ## Install
 
 ```bash
-pip install slim-llm-memory           # numpy + httpx only
-pip install slim-llm-memory[graph]    # + NetworkX graph layer
-pip install slim-llm-memory[rerank]   # + sentence-transformers cross-encoder
+pip install slim-llm-memory
+ollama pull nomic-embed-text      # embeddings
+ollama pull llama3.2:3b           # only needed for answer()
 ```
 
-Working on the library itself:
+Python 3.10 or newer. Optional extras:
 
-```bash
-pip install -e .                      # then `import slim_llm_memory` works anywhere
-```
+| Extra | Adds |
+|---|---|
+| `slim-llm-memory[rerank]` | cross-encoder reranking (sentence-transformers) |
+| `slim-llm-memory[graph]` | links between documents (NetworkX) |
+| `slim-llm-memory[obsidian]` | experimental Obsidian vault ingest; Python API only, no command yet |
 
-Install it even for local hacking. Running from the repo root with `PYTHONPATH=.`
-works, but it hides packaging bugs — a broken console-script entry survived exactly
-that way until the package was first installed for real.
+The `[gemini]` and `[anthropic]` extras are placeholders. No code uses them yet.
 
-The `[gemini]` and `[anthropic]` extras are declared but **not yet implemented**:
-no module imports them. `Embedder` currently offers `noop` and `ollama`, and the
-answer path talks only to Ollama.
-
-## 30-second tour
-
-```python
-from slim_llm_memory import Memory, Embedder
-
-# Local Ollama for embeddings, persistent index in ./mymemory/
-mem = Memory("./mymemory", Embedder.ollama("nomic-embed-text"))
-
-# Add or update items — only changed texts are re-embedded
-mem.upsert([
-    {"id": "doc1", "text": "how to set up nginx", "meta": {"kind": "note"}},
-    {"id": "doc2", "text": "milch kaufen",        "meta": {"kind": "shopping"}},
-])
-
-# Top-k semantic search — optional filters
-hits = mem.search("nginx tutorial", k=5, kinds={"note"}, min_score=0.55)
-for h in hits:
-    print(h.id, h.score, h.text)
-
-# Find duplicates by cosine similarity
-clusters = mem.find_duplicates(threshold=0.86)
-
-# Atomic persistence — safe to crash mid-anything
-mem.flush()
-```
-
-`Embedder.noop()` exists for tests and offline development — same
-interface, deterministic SHA-256 derived vectors, no network.
-
-## What's in the box (phase 1)
-
-| Module        | Purpose                                                      |
-|---------------|--------------------------------------------------------------|
-| `index.py`    | `Memory`, `Hit` — public API                                 |
-| `store.py`    | Versioned manifest + atomic flush + fcntl lock + tombstones  |
-| `embed.py`    | `Embedder.noop` (tests) + `Embedder.ollama` (local)          |
-| `obs.py`      | Per-instance ring buffers + counters for `Memory.stats()`    |
-
-Public API surface (the only thing callers see):
-
-```
-Memory(path, embedder)
-  .upsert(items)              → {added, updated, skipped, embed_calls}
-  .search(query, k, kinds, min_score)  → [Hit, ...]
-  .neighbours(id, k, kinds)   → [Hit, ...]  (no embed call)
-  .search_vector(vec, k, kinds, min_score) → [Hit, ...]  (pre-embedded query)
-  .find_duplicates(threshold) → [[id, ...], ...]
-  .update_text(id, text)      → bool
-  .remove(id)                 → bool
-  .stats()                    → dict (JSON-safe)
-  .flush(force=False)         → bool
-  .close(flush=True)
-  context manager: `with Memory(...) as mem: ...`
-
-Embedder.noop(dim=384)
-Embedder.ollama(model="nomic-embed-text", base_url="http://localhost:11434", timeout=60)
-```
-
-## Persistence model
-
-Files in your index directory:
-
-```
-items.vN.jsonl       one record per item: {id, text, hash, meta, ts, deleted?}
-vectors.vN.npy       float32 ndarray, shape (N, dim) — row-aligned with items
-manifest.json        atomic commit point; loading always honours its version pointer
-.lock                advisory exclusive lock (one writer per directory)
-```
-
-A crash mid-flush leaves the **previous manifest version intact** — the
-old files load cleanly. Garbage versioned files left behind by
-crashes are ignored on next load.
-
-## Performance
-
-At p95 on a CPU with prenormalised float32 vectors:
-
-| Items  | Pure-Python cosine | numpy linear scan (this lib) | faiss HNSW (phase 7) |
-|--------|--------------------|------------------------------|----------------------|
-| 1k     | 5–20 ms            | <1 ms                        | <1 ms                |
-| 10k    | 50–200 ms          | 5 ms                         | <1 ms                |
-| 50k    | 0.5–2 s            | 30 ms                        | 1–10 ms              |
-| 100k+  | dead               | 100–500 ms                   | 1–10 ms              |
-
-Phase 1 ships the numpy linear scan. When you outgrow it, swap the
-storage backend behind the same `Memory.search()` signature.
-
-## Topic store: fast context for an LLM working on one topic
-
-`topic()` is the "one numpy store per topic" shape with a `requests`-style
-front door: open a store, put text in, get context out.
+## Quickstart
 
 ```python
 from slim_llm_memory import topic
 
-t = topic("nginx")                          # ~/.slim-llm-memory/topics/nginx, Ollama nomic-embed-text
-t.add("docs/")                              # file, directory, raw text, or {name: text}; saved on return
-r = t.ask("how do I enable TLS?")           # one embed call + one numpy scan
-r                                           # hits with scores, embed ms, scan ms
-r.context                                   # numbered block to prepend to an LLM prompt
-t.answer("how do I enable TLS?")            # + a local Ollama chat model, grounded on r.context
+t = topic("nginx")                  # a store in ~/.slim-llm-memory/topics/nginx
+t.add("docs/nginx/")                # every .md, .txt and .rst file in the folder
+r = t.ask("how do I enable TLS?")   # the best matching passages
+print(r)                            # hits, scores and timings
+print(r.context)                    # numbered passages, ready to paste into a prompt
+
+print(t.answer("how do I enable TLS?"))   # a local model answers from those passages and cites them
 ```
 
-`t.add` is incremental (unchanged chunks are never re-embedded), `t.forget(name)`
-drops a doc, `embedder="noop"` runs offline for tests.
+`add` also takes a single file, raw text, or a `{name: text}` dict. Running it again only
+re-embeds what changed, and `t.forget("old.md")` removes a document. To try the API
+without Ollama, pass `embedder="noop"`: every call works, but the similarity scores mean
+nothing.
 
-Several topics make a database. `library()` is a folder of topic stores;
-`ask` embeds once and scans every topic, archiving is a folder move:
+## Many topics
+
+A library is a folder of topics that you can search together.
 
 ```python
 from slim_llm_memory import library
 
-db = library()                              # ~/.slim-llm-memory/topics
+db = library()                          # ~/.slim-llm-memory/topics
 db.topic("nginx").add("docs/nginx/")
-db.topic("cooking").add({"pasta.md": "..."})
-db                                          # table of topics
-db.ask("how do I enable TLS?")              # hits labelled by topic, merged by score
-db.ask("...", topics=["nginx"])
-db.route("how do I enable TLS?")             # stage 1 alone: topics ranked by centroid similarity
-db.ask("...", route=True)                    # two-stage: route, then scan only the chosen topics
-db.archive("cooking"); db.restore("cooking"); db.delete("cooking")
+db.topic("cooking").add({"pasta.md": "Boil 100 g pasta per person in salted water."})
+
+print(db)                               # a table of topics
+db.ask("how do I enable TLS?")          # searches every topic; each hit names its topic
+db.ask("...", topics=["nginx"])         # search only some topics
+db.archive("cooking")                   # hide from ask(); db.restore("cooking") brings it back
 ```
 
-`ask` is exact (one concatenated scan) until the library holds more than
-50k chunks, then it routes through topic centroids automatically; topics
-within 0.05 of the best centroid are kept, and a prompt that matches no
-topic falls back to the exact scan. `examples/03_routing_bench.py` has the
-numbers: at 500 topics × 200 chunks, routing cuts the scan from ~40 ms to ~2 ms.
+Once a library holds more than 50,000 passages, `ask` first picks the topics closest to
+the question and searches only those. `db.route(question)` shows that choice on its own.
 
-### Accuracy: hybrid retrieval, reranking, evaluation
+## Better results
+
+By default `ask` combines embedding search with keyword search (BM25), so exact names,
+numbers and file names still match. You can change that per call:
 
 ```python
-t.ask(q)                                    # hybrid (default): dense cosine ∪ BM25, fused by normalised score
-t.ask(q, mode="dense") / t.ask(q, mode="keyword")
-t.ask(q, rerank=True)                       # cross-encoder over the top 4·k  (pip install slim-llm-memory[rerank])
-t.ask(q, rerank="auto")                     # ...but only when the top of the ranking is actually contested
-t.ask(q, rerank=rr, rerank_margin=0.15)     # same policy with your own reranker; r.rerank_skipped says what happened
-t.answer(q, rewrite=True, refuse_below=0.4, stream=False)   # query rewrite, refusal, validated [n] citations
+t.ask(q, mode="dense")          # embeddings only
+t.ask(q, mode="keyword")        # keywords only
+t.ask(q, rerank=True)           # a cross-encoder re-reads the top candidates (needs [rerank])
+t.ask(q, rerank="auto")         # the same, but only when the top results are close together
+t.answer(q, refuse_below=0.4)   # refuse instead of answering when no passage is close enough
+t.answer(q, rewrite=True)       # the model rewrites the question as a search query first
+```
 
+Measure on your own questions before you tune anything:
+
+```python
 from slim_llm_memory import evaluate
-evaluate(t, [("which file is the commit point?", "manifest"), ...], k=5)   # hit@1, hit@k, MRR
+
+# each case: a question, and a word from the right passage (or its document name)
+evaluate(t, [("which file is the commit point?", "manifest")], k=5)   # hit@1, hit@5, MRR
 ```
 
-On the eight doc questions in `notebooks/accuracy_demo.ipynb` (four of them
-with the product name in the question, which drags the intro chunks up),
-measured over this repo's own docs:
+On eight questions about this repo's docs, the default search had the right passage in
+its top 5 for 7 of them, and adding the reranker found all 8. `rerank="auto"` gave the same
+answers as always reranking and was 4.8× faster. Tables and setup:
+[docs/BENCHMARKS.md](https://github.com/trbck/slim-llm-memory/blob/main/docs/BENCHMARKS.md).
 
-| retrieval | hit@1 | hit@5 | MRR |
-|---|---|---|---|
-| dense | 0.38 | 0.62 | 0.47 |
-| hybrid (default) | 0.38 | 0.88 | 0.56 |
-| hybrid + cross-encoder rerank | 0.62 | 1.00 | 0.76 |
-
-Chunks are heading-aware with a 20-word overlap (`topic(..., chunk_words=120,
-overlap=20)`); a tuning grid over chunk size, overlap and the fusion weight is
-in the notebook and confirms the defaults. Re-tune per corpus with `evaluate()`.
-
-Reranking is the most accurate and by far the slowest step, so `rerank="auto"`
-pays for it only when the top of the ranking is contested: it compares the
-leader's lead over the runner-up against the pool's spread, and skips the model
-when that relative gap is at least `rerank_margin` (default 0.15).
-`examples/04_rerank_bench.py` measures the trade on a 14-document corpus and 10
-questions — with the real embedder and `bge-reranker-v2-m3` on this CPU box:
-
-| policy | MRR | hit@1 | reranker calls | ms/query |
-|---|---|---|---|---|
-| off | 1.00 | 1.00 | 0 | 447 |
-| auto | 1.00 | 1.00 | 0 of 10 | 749 |
-| always | 1.00 | 1.00 | 10 | 3622 |
-
-Same answers, 4.8× faster than reranking everything. On a harder corpus (the
-`--offline` run, where dense retrieval alone gets one question wrong) auto
-reranks 3 of 10 questions and recovers the full MRR that `always` reaches.
-`r.rerank_skipped` reports the decision per query.
-
-### Structure: graph, entities, sessions
+## Links, entities and chat history
 
 ```python
-t.link("nginx.md", "certbot.md", relation="uses")    # typed edges, graph.json next to the vectors
-t.related("nginx.md")                                # 0.6·cosine + 0.4·graph; [[wikilinks]] become edges on add
-t.add(text, enrich=True)                             # local LLM extracts entities + relations (slow, opt-in)
-t.entities(); t.ask(q, entity="Postgres")            # filter by extracted entity
+t.link("nginx.md", "certbot.md", relation="uses")   # needs [graph]
+t.related("nginx.md")                               # similar and linked documents
+t.add("docs/", enrich=True)                         # a local model extracts names and relations (slow, needs [graph])
+t.ask(q, entity="Postgres")                         # only passages that mention Postgres
 
-s = db.session("2026-09-04")                         # conversation memory as a topic store
-s.turn("user", "..."); s.recall("what did we decide?"); s.history(5); s.summary(model=...)
+s = db.session("2026-09-13 refactor")               # a conversation you can search later
+s.turn("user", "the flaky test was the shared tmp dir")
+s.recall("why were tests flaky?")
+s.history(5)                                        # the last 5 turns, in order
 ```
 
-`notebooks/library_demo.ipynb` walks through it. `notebooks/use_cases_demo.ipynb`
-measures four real use cases (grounded answers, paraphrase, languages, agent
-session memory) and ends with an honest table of what is missing compared to a
-full RAG stack, an ontology, and a vector database.
+With `[graph]` installed, `[[wikilinks]]` in your documents become links when you add them.
 
-`notebooks/topic_context_demo.ipynb` (executed, 14 cells) and
-`examples/02_topic_context.py` are the proof: this repo's docs as the
-topic, live prompts with the latency split into embed vs scan, an
-incremental update, an optional grounded LLM answer, and a synthetic scale
-run. Measured on an 8-core CPU box (Ollama CPU-only):
+## Low-level API
 
-| Step | Cost | Where the time goes |
-|------|------|---------------------|
-| Prompt → context (33 chunks) | 1.2–1.5 s | Ollama embed of the prompt: >99.9 %. Scan: 0.2–0.5 ms |
-| Re-index after one edit | 1 embed call | 32 chunks hash-skipped, 1 re-embedded |
-| Scan, 1k × 768 | 0.3 ms p50 / 1.3 ms p95 | numpy GEMV + argpartition |
-| Scan, 10k × 768 | 2.4 ms p50 / 7.3 ms p95 | |
-| Scan, 50k × 768 | 12 ms p50 / 22 ms p95 | |
+`topic()` is built on `Memory`, a vector index for when you want to manage ids and
+splitting yourself.
 
-The retrieval itself is never the bottleneck at this scale; the embedder is.
-On a GPU or with a cloud embedder the prompt-to-context time drops to tens
-of milliseconds and the scan numbers above are what remains.
+```python
+from slim_llm_memory import Embedder, Memory
 
-```bash
-PYTHONPATH=. python examples/02_topic_context.py --fresh                  # cold build + queries + scale
-PYTHONPATH=. python examples/02_topic_context.py --llm llama3.2:3b        # + grounded answer
+with Memory("./mymemory", Embedder.ollama("nomic-embed-text")) as mem:
+    mem.upsert([
+        {"id": "doc1", "text": "how to set up nginx", "meta": {"kind": "note"}},
+        {"id": "doc2", "text": "buy milk",            "meta": {"kind": "shopping"}},
+    ])                                          # embeds only new or changed text
+    hits = mem.search("nginx tutorial", k=5, kinds={"note"}, min_score=0.55)
+    groups = mem.find_duplicates(threshold=0.86)
 ```
 
-## Tests + examples
+`Memory` also has `neighbours(id)`, `search_vector(vec)`, `update_text(id, text)`,
+`remove(id)`, `stats()` and `flush()`. `Embedder.noop()` gives offline vectors for tests.
 
-```bash
-pytest                              # 169 tests, no network (Embedder.noop)
-python examples/01_minimal.py       # after `pip install -e .`
+## How your data is stored
+
+Each store is a plain folder:
+
+```
+items.vN.jsonl    one line per item: id, text, content hash, metadata
+vectors.vN.npy    the embeddings, one row per item
+manifest.json     points at the current version
+.lock             only one process writes to a folder at a time
 ```
 
-### Notebooks
+A save writes new versioned files first and switches `manifest.json` over only once they
+are complete. If the process crashes mid-save, the previous version still loads.
 
-Start with the four `hello` notebooks — each is about ten lines and answers one
-question. They need Ollama running with `nomic-embed-text` pulled.
+## Speed and limits
+
+Search is one numpy scan: 0.3 ms over 1,000 passages, 2.4 ms over 10,000 and 12 ms over
+50,000 (median, 8-core CPU). The slow step is Ollama embedding the question, about 1.2 to
+1.5 s on that CPU without a GPU.
+
+It is built for one process on one machine. When that stops being enough:
+
+| When | Replace |
+|---|---|
+| search takes over 100 ms at your size | `index.py` with faiss (HNSW) |
+| a second process needs to write | `store.py` with SQLite + sqlite-vss |
+| more than 1M items | both, with a vector database such as Qdrant or Weaviate |
+
+## Notebooks and examples
+
+Start with the four hello notebooks. Each is about ten lines and needs Ollama running.
 
 | Notebook | Shows |
 |---|---|
-| `notebooks/00_hello_topic.ipynb`   | the three verbs: `topic()` / `.add()` / `.ask()` |
-| `notebooks/01_hello_library.ipynb` | many topics behind one handle, and `route()` |
-| `notebooks/02_hello_memory.ipynb`  | the low-level `Memory` API this tour uses |
-| `notebooks/03_hello_answer.ipynb`  | a grounded answer with citations, and refusal |
+| [00_hello_topic](https://github.com/trbck/slim-llm-memory/blob/main/notebooks/00_hello_topic.ipynb) | `topic()`, `.add()`, `.ask()` |
+| [01_hello_library](https://github.com/trbck/slim-llm-memory/blob/main/notebooks/01_hello_library.ipynb) | many topics behind one handle, and `route()` |
+| [02_hello_memory](https://github.com/trbck/slim-llm-memory/blob/main/notebooks/02_hello_memory.ipynb) | the low-level `Memory` API |
+| [03_hello_answer](https://github.com/trbck/slim-llm-memory/blob/main/notebooks/03_hello_answer.ipynb) | a cited answer, and refusal |
 
-The longer notebooks (`topic_context_demo`, `library_demo`, `accuracy_demo`,
-`use_cases_demo`) go deeper on measurement.
+The longer notebooks in [notebooks/](https://github.com/trbck/slim-llm-memory/tree/main/notebooks)
+measure things. `use_cases_demo` tests cited answers, paraphrased questions, other
+languages and chat memory, and ends with a list of what is missing compared with a full
+RAG stack.
 
-## Migration paths
+Scripts in [examples/](https://github.com/trbck/slim-llm-memory/tree/main/examples):
+`01_minimal.py` runs offline, `02_topic_context.py` is the full question-to-answer flow,
+and `03_routing_bench.py` and `04_rerank_bench.py` produce the benchmark numbers.
 
-When the slim stack stops being enough, swap one file:
+## Development
 
-| Symptom                              | Replace                                    |
-|--------------------------------------|--------------------------------------------|
-| Search p95 > 100 ms at your scale    | `index.py` → faiss-cpu HNSW (same API)     |
-| Need a 2nd writer process            | `store.py` → SQLite + sqlite-vss extension |
-| > 1M items                           | both → Qdrant / Weaviate as a service      |
-| Need real multi-hop graph queries    | future `graph.py` → Kùzu (embedded)        |
-| Local LLM too slow / quality too low | future `tier.py` → drop L2; route L0 → L3  |
+```bash
+git clone https://github.com/trbck/slim-llm-memory && cd slim-llm-memory
+pip install -e ".[test]"
+pytest          # no network needed; tests for extras you have not installed are skipped
+```
 
-The whole point is: you don't outgrow it gradually. When you do, the
-symptoms are obvious and the migration is local.
+Install the package instead of running with `PYTHONPATH=.`, which hides packaging bugs.
 
-## Releasing
-
-Bump `__version__`, update `CHANGELOG.md`, push a `vX.Y.Z` tag — CI publishes to PyPI.
-Full steps: [RELEASING.md](RELEASING.md).
+- [docs/IMPLEMENTATION.md](https://github.com/trbck/slim-llm-memory/blob/main/docs/IMPLEMENTATION.md): the original design plan
+- [RELEASING.md](https://github.com/trbck/slim-llm-memory/blob/main/RELEASING.md): how to publish a new version
+- [CHANGELOG.md](https://github.com/trbck/slim-llm-memory/blob/main/CHANGELOG.md): what changed
 
 ## License
 
-MIT.
+MIT
