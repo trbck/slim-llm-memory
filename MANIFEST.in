@@ -1,5 +1,9 @@
 # sdist = everything needed to run the test suite from the tarball.
-include LICENSE README.md CHANGELOG.md docs/IMPLEMENTATION.md
+include LICENSE README.md CHANGELOG.md RELEASING.md docs/IMPLEMENTATION.md
 graft tests
 graft examples
 global-exclude __pycache__ *.py[cod]
+# Local tooling state never ships, even if a file lands in a grafted dir.
+prune .boil
+prune .claude
+global-exclude HANDOFF.md PORTFOLIO.md

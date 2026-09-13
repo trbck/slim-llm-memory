@@ -295,6 +295,11 @@ When the slim stack stops being enough, swap one file:
 The whole point is: you don't outgrow it gradually. When you do, the
 symptoms are obvious and the migration is local.
 
+## Releasing
+
+Bump `__version__`, update `CHANGELOG.md`, push a `vX.Y.Z` tag — CI publishes to PyPI.
+Full steps: [RELEASING.md](RELEASING.md).
+
 ## License
 
 MIT.

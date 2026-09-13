@@ -23,3 +23,6 @@ htmlcov/
 .accuracy_nb_ml/
 .hello_nb/
 .boil/
+.claude/
+HANDOFF.md
+PORTFOLIO.md
