@@ -371,15 +371,21 @@ class Topic:
         """``[[Target]]`` in a doc → edge doc → Target when a doc of that name (or stem) exists."""
         known = set(self.docs())
         stems = {Path(d).stem: d for d in known}
-        changed = False
+        links = []
         for doc, text in docs.items():
             for target in wikilinks(text):
                 dst = target if target in known else stems.get(Path(target).stem)
                 if dst and dst != doc:
-                    self.graph.link(doc, dst, "links")
-                    changed = True
-        if changed:
-            self.graph.save()
+                    links.append((doc, dst))
+        if not links:
+            return
+        try:
+            graph = self.graph
+        except ImportError:       # links need the [graph] extra; add() must still succeed without it
+            return
+        for doc, dst in links:
+            graph.link(doc, dst, "links")
+        graph.save()
 
     def _collect(self, source: Any, name: "str | None") -> dict[str, str]:
         if isinstance(source, Mapping):

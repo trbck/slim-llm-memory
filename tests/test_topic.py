@@ -219,3 +219,14 @@ def test_chunk_overlap_and_heading_meta(tmp_path: Path):
         items = [it for it in tp.memory.store.items if not it.deleted]
         assert [it.meta.get("heading") for it in items] == ["# Setup", "# Setup", "## Tuning"]
         assert items[1].text.startswith("# Setup\n\n… w90 w91")
+
+
+def test_add_with_wikilinks_succeeds_without_graph_extra(tmp_path: Path, monkeypatch):
+    """A base install has no networkx; a [[wikilink]] in a note must not make add() raise."""
+    import sys
+    monkeypatch.setitem(sys.modules, "networkx", None)          # `import networkx` -> ImportError
+    with topic("w", path=tmp_path / "w", embedder="noop") as t:
+        t.add({"b.md": "the target note"})
+        r = t.add({"a.md": "see [[b]] for details"})
+        assert r.embedded == 1
+        assert t.docs() == ["a.md", "b.md"]
