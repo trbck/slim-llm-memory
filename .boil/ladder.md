@@ -25,7 +25,7 @@ replaces the life block only when L3 is green. -->
 - [x] Setup from scratch documented and re-tested — EVIDENCE: same clean-clone run; `cd /tmp && python examples/01_minimal.py` -> exit 0 with no PYTHONPATH | 2026-09-09 | auto
 
 ## L3 — Survives a stranger
-- [x] Installable without me: `pip install .` into a clean env, import works — EVIDENCE: `pip wheel --no-deps .` then `pip install` into a fresh venv -> `import slim_llm_memory` OK 0.1.0, README tour runs; wheel carries all 22 modules incl. `apps.obsidian` | 2026-09-09 | auto
+- [x] Installable without me: `pip install .` into a clean env, import works — EVIDENCE: `uv build` + `twine check --strict` PASSED (sdist + wheel); wheel[test] into clean py3.10 and py3.13 venvs, tests run from the unpacked sdist -> 138 passed / 4 skipped on both | 2026-09-13 | auto
 - [ ] Survives process restart with zero data loss (atomic flush + lock, verified)
 - [ ] Errors handled: Ollama down, empty store, bad input — no raw traceback reaches the caller
 - [ ] A stranger onboards from the README alone — fresh-eyes run (person or clean-env agent)

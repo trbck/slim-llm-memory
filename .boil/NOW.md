@@ -14,12 +14,12 @@
 - none open — pick the next ladder criterion or close the goal
 
 ## Last session
-**2026-09-09 — charter + ladder (governance)**
-Goal 1 closed: `boil-doctor.py --final` -> FINAL OK, 5/5 boxes with fresh EVIDENCE.
-Wrote `.boil/charter.md` and `.boil/ladder.md`, clearing the UNGOVERNED flag. Track is
-**life first, revisit business at L3**; north star is retrieval quality vs. plain BM25 on a
-*real* corpus at bounded latency (currently negative — advisor's BM25 wins, ~1600x faster);
-_(+13 more lines in log.md)_
+**2026-09-13 — release-ready package**
+Added LICENSE, `py.typed`, CHANGELOG, MANIFEST.in, `.github/workflows/ci.yml` (3.10–3.13 +
+build/twine) and `release.yml` (tag `v*` -> PyPI trusted publishing). pyproject: SPDX
+`license = "MIT"`, version single-sourced from `__version__`, `tomli` for 3.10 tests.
+Two bugs found by testing the tarball instead of the checkout:
+_(+7 more lines in log.md)_
 
 ---
 **Next:** goal is green — run `boil-doctor.py --final` and hand off.

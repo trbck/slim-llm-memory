@@ -1,22 +1,27 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "slim-llm-memory"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Slim, fast, persistent memory + retrieval for LLM apps. numpy + httpx, ~1000 LOC, drops into anything."
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{name = "trbck"}]
 keywords = ["llm", "embeddings", "vector", "memory", "rag", "ollama"]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
 ]
 dependencies = [
     "numpy>=1.24",
@@ -29,12 +34,14 @@ graph = ["networkx>=3.0"]
 rerank = ["sentence-transformers>=3.0"]
 anthropic = ["anthropic>=0.40"]
 obsidian = ["watchdog>=4", "pyyaml>=6", "mcp>=2"]
-test = ["pytest>=7", "pytest-asyncio>=0.23"]
-dev = ["slim-llm-memory[test,gemini,graph,anthropic,obsidian,rerank]", "ruff>=0.6"]
+test = ["pytest>=7", "pytest-asyncio>=0.23", "tomli>=2; python_version < '3.11'"]
+dev = ["slim-llm-memory[test,gemini,graph,anthropic,obsidian,rerank]", "ruff>=0.6", "build>=1", "twine>=5"]
 
 [project.urls]
 Homepage = "https://github.com/trbck/slim-llm-memory"
 Documentation = "https://github.com/trbck/slim-llm-memory/blob/main/docs/IMPLEMENTATION.md"
+Changelog = "https://github.com/trbck/slim-llm-memory/blob/main/CHANGELOG.md"
+Issues = "https://github.com/trbck/slim-llm-memory/issues"
 
 # [project.scripts]
 # Restore this once a runnable entrypoint exists. It pointed at
@@ -43,9 +50,15 @@ Documentation = "https://github.com/trbck/slim-llm-memory/blob/main/docs/IMPLEME
 # ModuleNotFoundError. tests/test_packaging.py guards against a repeat.
 # slim-llm-obsidian = "slim_llm_memory.apps.obsidian.cli:main"
 
+[tool.setuptools.dynamic]
+version = {attr = "slim_llm_memory.__version__"}
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["slim_llm_memory*"]
+
+[tool.setuptools.package-data]
+slim_llm_memory = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

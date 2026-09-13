@@ -1,0 +1,41 @@
+# Publishes to PyPI when a `v*` tag is pushed. Uses PyPI trusted publishing:
+# no token in the repo. One-time setup on pypi.org -> "Add a pending publisher":
+# owner trbck, repo slim-llm-memory, workflow release.yml, environment pypi.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check --strict dist/*
+      - name: tag matches package version
+        run: |
+          v=$(grep -Po '__version__ = "\K[^"]+' slim_llm_memory/__init__.py)
+          test "v$v" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} != package v$v"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

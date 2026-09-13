@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import importlib
 import pathlib
-import tomllib
 
 import pytest
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
 
 PYPROJECT = pathlib.Path(__file__).resolve().parent.parent / "pyproject.toml"
 

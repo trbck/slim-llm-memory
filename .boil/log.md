@@ -41,3 +41,19 @@ Three findings from the verification pass, all pointing the same way:
 Next goal candidate (ahead of the earlier lazy-pool idea): make the thing installable and
 integrate it into one real project — that is the L2 blocker and the north star needs a real
 corpus to be measured on anyway.
+
+## 2026-09-13 — release-ready package
+
+Added LICENSE, `py.typed`, CHANGELOG, MANIFEST.in, `.github/workflows/ci.yml` (3.10–3.13 +
+build/twine) and `release.yml` (tag `v*` -> PyPI trusted publishing). pyproject: SPDX
+`license = "MIT"`, version single-sourced from `__version__`, `tomli` for 3.10 tests.
+
+Two bugs found by testing the tarball instead of the checkout:
+1. `tests/test_packaging.py` imported `tomllib` — the suite could not run on 3.10, which
+   `requires-python` promises.
+2. The sdist shipped without `examples/` and `tests/obsidian/`, so a test failed from the tarball.
+
+Proof: `uv build` + `twine check --strict` PASSED x2; wheel into clean venvs, tests from the
+unpacked sdist -> py3.10 138 passed/4 skipped (twice), py3.13 138 passed/4 skipped; repo suite
+169 passed. One segfault on 3.10 while both venv runs were concurrent; not reproduced solo,
+cause unknown. Not published: no PyPI credentials here, and uploading is the user's call.
