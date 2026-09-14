@@ -1,7 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-09-14
 
+- New: `MemoryTools` — remember / recall / forget / answer / topics with JSON in and JSON out,
+  plus `dispatch(name, args)`; `anthropic_tools()` and `openai_tools()` emit the tool definitions.
+- New: `slim-memory-mcp`, an MCP server over the same five verbs (`pip install slim-llm-memory[mcp]`).
+- New: `to_dict()` on `Result`, `Hit`, `Answer`, `Report`, `Route` and `Added`.
+- New: `docs/llms.txt`, the whole API on one page for coding agents; shipped in the sdist.
 - Fix: re-adding an unchanged document (re-indexing a folder, say) dropped the entities that
   `add(enrich=...)` had extracted for its chunks, because the meta-only update replaced the
   metadata wholesale. Entities now survive as long as the chunk text is unchanged.

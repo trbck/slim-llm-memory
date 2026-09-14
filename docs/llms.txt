@@ -1,0 +1,140 @@
+# slim-llm-memory — API sheet for coding agents
+
+Local memory and retrieval for LLM apps. numpy + httpx only; embeddings from Ollama on this
+machine. One folder per store, one numpy array each. Good to ~50,000 passages per store.
+Full prose docs: README.md. This file is the compact, complete reference.
+
+## Install and preconditions
+
+    pip install slim-llm-memory            # core
+    pip install "slim-llm-memory[mcp]"     # + MCP server (slim-memory-mcp)
+    pip install "slim-llm-memory[graph]"   # + links / [[wikilinks]] / related() (networkx)
+    pip install "slim-llm-memory[rerank]"  # + cross-encoder reranking (sentence-transformers)
+    ollama pull nomic-embed-text           # embeddings (required unless embedder="noop")
+    ollama pull llama3.2:3b                # only for answer() / summary()
+
+Gotchas, in order of how often they bite:
+1. Ollama must be running for every add/ask/answer. Without it: EmbedderError.
+   For tests and offline dev pass embedder="noop:64" (deterministic vectors, meaningless scores).
+2. A store is locked by the process that opened it. Call .close() (or use `with`) when done.
+   Re-opening the same path in the same process returns the already-open object.
+3. Scores are cosine similarity. ask() drops hits under min_score=0.3 by default; pass
+   min_score=0.0 (or -1.0 with the noop embedder) to see everything.
+4. add() re-embeds only chunks whose text changed (content hash). Re-adding a folder is cheap.
+5. Every ask/answer embeds the question: 50 ms on GPU, 1–3 s on a loaded CPU.
+
+## Five-verb agent surface (slim_llm_memory.tools)
+
+    from slim_llm_memory import MemoryTools, anthropic_tools, openai_tools
+    mem = MemoryTools(path=None, embedder="ollama:nomic-embed-text", model="llama3.2:3b", refuse_below=0.45)
+
+    mem.remember(topic, text, name=None) -> {"topic","doc","chunks","embedded","unchanged"}
+    mem.recall(question, topic=None, k=4) -> {"question","hits":[{id,score,text,doc,topic}],"context","ms"}
+    mem.forget(topic, doc)               -> {"topic","doc","removed"}
+    mem.answer(question, topic=None, k=4, refuse_below=None)
+                                         -> {"question","answer","refused","citations","sources","hits"}
+    mem.topics()                         -> {"topics":[{"name","docs","chunks"}]}
+    mem.dispatch(name, args_dict)        -> the same dicts; KeyError for an unknown name
+    mem.close()
+
+    anthropic_tools() -> list of {name, description, input_schema}     # Messages API `tools=`
+    openai_tools()    -> list of {type:"function", function:{...}}     # chat completions `tools=`
+    TOOLS             -> the neutral list {name, description, parameters}
+
+Minimal Anthropic loop:
+
+    import anthropic, json
+    from slim_llm_memory import MemoryTools, anthropic_tools
+    client, mem = anthropic.Anthropic(), MemoryTools()
+    msgs = [{"role": "user", "content": "Remember that deploys are on Tuesdays, then tell me when we deploy."}]
+    while True:
+        r = client.messages.create(model="claude-sonnet-5", max_tokens=1024, tools=anthropic_tools(), messages=msgs)
+        msgs.append({"role": "assistant", "content": r.content})
+        calls = [b for b in r.content if b.type == "tool_use"]
+        if not calls:
+            break
+        msgs.append({"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": c.id, "content": json.dumps(mem.dispatch(c.name, c.input))}
+            for c in calls]})
+
+MCP server (stdio):
+
+    slim-memory-mcp [--path DIR] [--embedder ollama:nomic-embed-text] [--model llama3.2:3b] [--refuse-below 0.45]
+    claude mcp add memory -- slim-memory-mcp
+    {"mcpServers": {"memory": {"command": "slim-memory-mcp", "args": ["--path", "/path/to/topics"]}}}
+
+## Topic: one store about one subject
+
+    from slim_llm_memory import topic
+    t = topic(name, path=None, embedder="ollama:nomic-embed-text", ollama_url="http://localhost:11434",
+              chunk_words=120, overlap=20)                 # path default: ~/.slim-llm-memory/topics/<slug>
+
+    t.add(source, name=None, enrich=False) -> Added(docs, chunks, embedded, skipped, removed); .to_dict()
+        source: file path | directory (.md/.txt/.rst, recursive) | raw text | {name: text} | list of paths
+        enrich=True|"model": a local model extracts entities → meta["entities"] and graph edges (slow)
+    t.forget(doc) -> int chunks removed
+    t.docs() -> [doc names];  len(t) -> chunks;  doc in t;  t.stats() -> dict
+    t.ask(prompt, k=4, mode="hybrid"|"dense"|"keyword", rerank=None|True|"auto"|Reranker,
+          rerank_margin=None, min_score=0.3, max_words=600, entity=None) -> Result
+    t.answer(question, model="llama3.2:3b", k=4, mode="hybrid", rerank=None, min_score=0.3,
+             rewrite=False, stream=False, refuse_below=None, timeout=600) -> Answer | iterator of str
+    t.related(doc_or_id, k=5, alpha=0.6) -> Result      # cosine + graph edges, no embedding call
+    t.link(a, b, relation="related", weight=1.0); t.unlink(a, b); t.neighbours(node, relation=None, depth=1)
+    t.entities() -> {entity: chunk count}
+    t.close()
+
+    Result: .hits [Hit], .top Hit|None, .context str (numbered block for a prompt), .ms, .embed_ms,
+            .scan_ms, .mode, .reranked, .routed, .to_dict(); iterable; truthy when it has hits
+    Hit:    .id "doc#idx", .score cosine, .text, .meta {doc, idx, kind, heading?, via?, topic?, entities?}, .to_dict()
+    Answer: a str; .hits, .context, .citations [int], .refused bool, .query, .to_dict()
+
+## Library: a folder of topics searched together
+
+    from slim_llm_memory import library
+    db = library(path=None, embedder=..., ollama_url=..., chunk_words=120, overlap=20)
+    db.topic(name) -> Topic (created if absent);  db.topics(archived=False) -> [TopicInfo(name, slug, chunks, docs, archived, path)]
+    db.ask(prompt, k=5, topics=None, include_archived=False, min_score=0.3, max_words=600,
+           route="auto"|True|False|int, mode="hybrid", rerank=None, rerank_margin=None, entity=None) -> Result
+        hits carry meta["topic"]; ids are "topic/doc#idx"
+    db.answer(question, model="llama3.2:3b", k=4, ...same as Topic.answer) -> Answer
+    db.route(prompt, m=None, margin=None, min_score=None, include_archived=False) -> Route(.ranked, .chosen, .to_dict())
+    db.archive(name); db.restore(name); db.delete(name)
+    db.session(name) -> Session;  db.sessions() -> [names]
+    db.close()
+    Routing: above 50,000 total chunks ask() first picks the closest topics by centroid, then scans only those.
+
+## Session: a conversation you can search
+
+    from slim_llm_memory import session
+    s = session(name, path=None, embedder=..., ollama_url=...)
+    s.turn(role, text, **meta) -> doc name "00042-user"
+    s.history(n=10) -> [(role, text)] oldest first;  s.transcript(n=0) -> str
+    s.recall(prompt, k=5, **ask_kwargs) -> Result
+    s.summary(model="llama3.2:3b", n=0) -> str        # one model call over the transcript
+    len(s); iter(s); s.close()
+
+## Evaluate before tuning
+
+    from slim_llm_memory import evaluate, Case
+    evaluate(target, cases, k=5, label="", **ask_kwargs) -> Report
+        cases: [(question, expect)] where expect is a substring of the right chunk, its doc name, or an id prefix
+    Report: .hit1, .hitk, .mrr, .summary() -> {"hit@1","hit@k","mrr"}, .rows, .to_dict()
+
+## Low-level: Memory (manage ids and chunking yourself)
+
+    from slim_llm_memory import Embedder, Memory
+    Embedder.ollama(model="nomic-embed-text", base_url=...);  Embedder.noop(dim=384)
+    mem = Memory(path, embedder)
+    mem.upsert([{"id", "text", "meta"?}, ...]) -> {"added","updated","skipped","embed_calls"}   # hash-skip
+    mem.search(query, k=10, kinds=None, min_score=0.0) -> [Hit]      # kinds filters meta["kind"]
+    mem.search_vector(vector, k=10, kinds=None, min_score=0.0) -> [Hit]
+    mem.neighbours(item_id, k=10, kinds=None) -> [Hit]               # no embedding call
+    mem.find_duplicates(threshold=0.86) -> [[ids], ...]
+    mem.update_text(id, text); mem.remove(id); mem.stats(); mem.flush(force=False); mem.close()
+
+## On disk
+
+    <store>/items.vN.jsonl   id, text, hash, meta      <store>/vectors.vN.npy   one row per item
+    <store>/manifest.json    current version (atomic switch)     <store>/.lock   one writer per folder
+    graph.json (links), bm25.vN.npz (keyword index cache), topic.json (library metadata)
+    Back up with cp -r. Delete the folder to start over.

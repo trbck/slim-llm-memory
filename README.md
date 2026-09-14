@@ -23,6 +23,7 @@ Python 3.10 or newer. Optional extras:
 |---|---|
 | `slim-llm-memory[rerank]` | cross-encoder reranking (sentence-transformers) |
 | `slim-llm-memory[graph]` | links between documents (NetworkX) |
+| `slim-llm-memory[mcp]` | the `slim-memory-mcp` server for MCP clients |
 | `slim-llm-memory[obsidian]` | experimental Obsidian vault ingest; Python API only, no command yet |
 
 The `[gemini]` and `[anthropic]` extras are placeholders. No code uses them yet.
@@ -109,6 +110,35 @@ s.history(5)                                        # the last 5 turns, in order
 ```
 
 With `[graph]` installed, `[[wikilinks]]` in your documents become links when you add them.
+
+## For agents: five tools, an MCP server, and an API sheet
+
+An agent needs five verbs: remember, recall, forget, answer, topics. `MemoryTools` gives them
+JSON in and JSON out, and the two helpers emit the tool definitions in the shape each API expects.
+
+```python
+from slim_llm_memory import MemoryTools, anthropic_tools, openai_tools
+
+mem = MemoryTools()                                  # one library, ~/.slim-llm-memory/topics
+mem.remember("prefs", "The user prefers dark mode.", name="theme")
+mem.recall("what theme does the user like?", k=2)   # {"hits": [...], "context": "...", "ms": ...}
+mem.dispatch("forget", {"topic": "prefs", "doc": "theme"})
+
+tools = anthropic_tools()                            # or openai_tools(); pass as tools=...
+```
+
+The same five verbs as an MCP server, for Claude Code, Claude Desktop, Cursor and friends:
+
+```bash
+pip install "slim-llm-memory[mcp]"
+claude mcp add memory -- slim-memory-mcp            # Claude Code
+slim-memory-mcp --path ~/notes-memory --model qwen2.5:7b-instruct   # or configure by hand
+```
+
+Every result type (`Result`, `Hit`, `Answer`, `Report`, `Route`, `Added`) has `to_dict()`.
+[docs/llms.txt](https://github.com/trbck/slim-llm-memory/blob/main/docs/llms.txt) is the whole API
+on one page, written for a coding agent: paste it into the context of whatever is writing code
+against this package.
 
 ## Low-level API
 

@@ -34,8 +34,9 @@ graph = ["networkx>=3.0"]
 rerank = ["sentence-transformers>=3.0"]
 anthropic = ["anthropic>=0.40"]
 obsidian = ["watchdog>=4", "pyyaml>=6", "mcp>=2"]
+mcp = ["mcp>=2"]
 test = ["pytest>=7", "pytest-asyncio>=0.23", "tomli>=2; python_version < '3.11'"]
-dev = ["slim-llm-memory[test,gemini,graph,anthropic,obsidian,rerank]", "ruff>=0.6", "build>=1", "twine>=5"]
+dev = ["slim-llm-memory[test,gemini,graph,anthropic,obsidian,rerank,mcp]", "ruff>=0.6", "build>=1", "twine>=5"]
 
 [project.urls]
 Homepage = "https://github.com/trbck/slim-llm-memory"
@@ -43,12 +44,10 @@ Documentation = "https://github.com/trbck/slim-llm-memory/blob/main/docs/IMPLEME
 Changelog = "https://github.com/trbck/slim-llm-memory/blob/main/CHANGELOG.md"
 Issues = "https://github.com/trbck/slim-llm-memory/issues"
 
-# [project.scripts]
-# Restore this once a runnable entrypoint exists. It pointed at
-# slim_llm_memory.apps.obsidian.cli:main, which was never written, so every
-# `pip install` produced a `slim-llm-obsidian` command that raised
-# ModuleNotFoundError. tests/test_packaging.py guards against a repeat.
-# slim-llm-obsidian = "slim_llm_memory.apps.obsidian.cli:main"
+[project.scripts]
+# Every entry here must import on a plain install; tests/test_packaging.py checks.
+# (An earlier `slim-llm-obsidian` pointed at a module that was never written.)
+slim-memory-mcp = "slim_llm_memory.mcp_server:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "slim_llm_memory.__version__"}

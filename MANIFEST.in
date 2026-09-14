@@ -1,5 +1,5 @@
 # sdist = everything needed to run the test suite from the tarball.
-include LICENSE README.md CHANGELOG.md RELEASING.md docs/IMPLEMENTATION.md
+include LICENSE README.md CHANGELOG.md RELEASING.md docs/IMPLEMENTATION.md docs/llms.txt
 graft tests
 graft examples
 global-exclude __pycache__ *.py[cod]

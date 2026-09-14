@@ -70,6 +70,11 @@ class Answer(str):
         o.hits, o.context, o.citations, o.refused, o.query = hits, context, citations, refused, query
         return o
 
+    def to_dict(self) -> dict:
+        """Plain JSON-able dict: the text plus the audit trail it was built from."""
+        return {"answer": str(self), "refused": self.refused, "citations": list(self.citations),
+                "query": self.query, "hits": [h.to_dict() for h in self.hits], "context": self.context}
+
 
 def validate_citations(text: str, n_hits: int) -> tuple[str, list[int]]:
     """Drop ``[n]`` markers that point past the context; return (clean text, cited indices)."""

@@ -65,6 +65,10 @@ class Report:
     def summary(self) -> dict[str, float]:
         return {"hit@1": round(self.hit1, 3), f"hit@{self.k}": round(self.hitk, 3), "mrr": round(self.mrr, 3)}
 
+    def to_dict(self) -> dict[str, Any]:
+        return {**self.summary(), "k": self.k, "label": self.label, "n": self.n,
+                "rows": [{"question": r.question, "expect": r.expect, "rank": r.rank} for r in self.rows]}
+
     def __repr__(self) -> str:
         head = f"evaluate({self.label + ', ' if self.label else ''}{self.n} cases, k={self.k}):  " \
                f"hit@1 {self.hit1:.2f} · hit@{self.k} {self.hitk:.2f} · MRR {self.mrr:.2f}"

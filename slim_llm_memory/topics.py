@@ -91,6 +91,10 @@ class Added:
     def __bool__(self) -> bool:
         return (self.embedded + self.removed) > 0
 
+    def to_dict(self) -> dict[str, int]:
+        return {"docs": self.docs, "chunks": self.chunks, "embedded": self.embedded,
+                "unchanged": self.skipped, "removed": self.removed}
+
     def __repr__(self) -> str:
         return (f"added {self.docs} doc(s), {self.chunks} chunks: "
                 f"{self.embedded} embedded, {self.skipped} unchanged, {self.removed} removed")
@@ -147,6 +151,13 @@ class Result:
                 where = f"{h.meta['topic']}/{where}"
             lines.append(f"[{n}] ({where}, score {h.score:.2f})\n{body}")
         return "\n\n".join(lines)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Plain JSON-able dict of the hits, the context block and the timings."""
+        return {"prompt": self.prompt, "mode": self.mode, "hits": [h.to_dict() for h in self.hits],
+                "context": self.context, "embed_ms": round(self.embed_ms, 2), "scan_ms": round(self.scan_ms, 2),
+                "rerank_ms": round(self.rerank_ms, 2), "reranked": self.reranked,
+                "routed": self.routed, "routed_of": self.routed_of}
 
     def __iter__(self):
         return iter(self.hits)

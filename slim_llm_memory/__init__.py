@@ -20,7 +20,9 @@ from .evals import Case, Report, evaluate
 from .libraries import Library, library
 from .rerank import Reranker
 from .sessions import Session, session
+from .tools import MemoryTools, anthropic_tools, openai_tools
 from .topics import Topic, topic
 
-__all__ = ["Memory", "Hit", "Embedder", "EmbedderError", "Obs", "topic", "Topic", "library", "Library", "evaluate", "Case", "Report", "Reranker", "session", "Session"]
-__version__ = "0.1.1"
+__all__ = ["Memory", "Hit", "Embedder", "EmbedderError", "Obs", "topic", "Topic", "library", "Library", "evaluate", "Case", "Report", "Reranker", "session", "Session",
+           "MemoryTools", "anthropic_tools", "openai_tools"]
+__version__ = "0.2.0"

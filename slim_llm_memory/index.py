@@ -48,6 +48,11 @@ class Hit:
     text: str
     meta: dict[str, Any]
 
+    def to_dict(self) -> dict[str, Any]:
+        """Plain JSON-able dict: id, score, text, doc (from meta) and the rest of meta."""
+        return {"id": self.id, "score": round(float(self.score), 4), "text": self.text,
+                "doc": self.meta.get("doc"), "meta": dict(self.meta)}
+
 
 class Memory:
     """Persistent vector memory backed by ``Store`` + an ``Embedder``."""

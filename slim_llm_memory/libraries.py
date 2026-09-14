@@ -32,7 +32,7 @@ import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 import numpy as np
 
@@ -62,6 +62,11 @@ class Route:
     chosen: list[str]
     embed_ms: float
     route_ms: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"prompt": self.prompt, "chosen": list(self.chosen),
+                "ranked": [{"topic": n, "score": round(float(s), 4)} for n, s in self.ranked],
+                "embed_ms": round(self.embed_ms, 2), "route_ms": round(self.route_ms, 2)}
 
     def __repr__(self) -> str:
         head = f"route({self.prompt!r})  → {self.chosen}  · embed {self.embed_ms:.0f} ms · route {self.route_ms:.2f} ms"
