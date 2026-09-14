@@ -38,37 +38,46 @@ def build_server(path: "str | Path | None" = None, *, embedder: str = "ollama:no
     """Return an ``mcp.server.mcpserver.MCPServer`` with the five tools registered."""
     try:
         from mcp.server.mcpserver import MCPServer
+        from mcp.server.mcpserver.exceptions import ToolError
     except ImportError as exc:
         raise ImportError("pip install slim-llm-memory[mcp]  (the Model Context Protocol SDK, mcp>=2)") from exc
 
     mem = MemoryTools(path, embedder=embedder, ollama_url=ollama_url, model=model, refuse_below=refuse_below)
-    server = MCPServer("slim-llm-memory", instructions=INSTRUCTIONS)
+    server = MCPServer("slim-llm-memory", instructions=INSTRUCTIONS, log_level="WARNING")
+
+    def call(tool: str, **args: Any) -> dict[str, Any]:
+        """A bad argument (unknown topic, empty text) must reach the model as a readable message,
+        not as the SDK's generic "Error executing tool"; ToolError passes the text through."""
+        try:
+            return mem.dispatch(tool, args)
+        except (KeyError, ValueError) as exc:
+            raise ToolError(str(exc.args[0] if exc.args else exc)) from exc
 
     @server.tool(structured_output=True,
                  description="Store text in a named topic so it can be found later by meaning. "
                              "Re-using `name` updates the note instead of adding a second one.")
     def remember(topic: str, text: str, name: str | None = None) -> dict[str, Any]:
-        return mem.remember(topic, text, name)
+        return call("remember", topic=topic, text=text, name=name)
 
     @server.tool(structured_output=True,
                  description="Find the stored passages most relevant to a question, by meaning and exact words. "
                              "One topic, or all topics when `topic` is omitted. Returns hits and a context block.")
     def recall(question: str, topic: str | None = None, k: int = 4) -> dict[str, Any]:
-        return mem.recall(question, topic, k)
+        return call("recall", question=question, topic=topic, k=k)
 
     @server.tool(structured_output=True, description="Remove one document from a topic by name.")
     def forget(topic: str, doc: str) -> dict[str, Any]:
-        return mem.forget(topic, doc)
+        return call("forget", topic=topic, doc=doc)
 
     @server.tool(structured_output=True,
                  description="Answer a question from stored passages with a local model that cites them; "
                              "refuses when nothing stored is close enough. Slower than recall.")
     def answer(question: str, topic: str | None = None, k: int = 4) -> dict[str, Any]:
-        return mem.answer(question, topic, k)
+        return call("answer", question=question, topic=topic, k=k)
 
     @server.tool(structured_output=True, description="List topics with document and passage counts.")
     def topics() -> dict[str, Any]:
-        return mem.topics()
+        return call("topics")
 
     server._slim_memory = mem       # keeps the library open for the server's lifetime
     return server

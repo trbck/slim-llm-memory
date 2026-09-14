@@ -25,4 +25,4 @@ from .topics import Topic, topic
 
 __all__ = ["Memory", "Hit", "Embedder", "EmbedderError", "Obs", "topic", "Topic", "library", "Library", "evaluate", "Case", "Report", "Reranker", "session", "Session",
            "MemoryTools", "anthropic_tools", "openai_tools"]
-__version__ = "0.2.0"
+__version__ = "0.2.1"

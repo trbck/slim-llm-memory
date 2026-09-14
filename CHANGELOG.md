@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.2.1 — 2026-09-14
+
+Fixes from a review of 0.2.0, all with tests:
+
+- MCP: a bad argument (unknown topic, empty text, `k < 1`) now reaches the client as a readable
+  message instead of the SDK's generic "Error executing tool".
+- `MemoryTools`: `recall`/`forget`/`answer` accept any spelling of a topic name that `remember`
+  accepts (case, spaces, hyphens) and label hits and results with the topic's display name; `k` is
+  validated; `dispatch()` rejects unknown and missing arguments by name; `answer()` no longer
+  forwards arbitrary keyword arguments (a `stream=True` used to crash it).
+- Topic names are slugged without a leading `_` or `.`, so an agent-chosen `_archive` or
+  `.hidden` can no longer write a store into the library's own folders.
+- Unnamed notes are keyed by 12 hex digits of their hash instead of 6 (silent overwrite of a
+  different note after a few thousand notes).
+- `Topic.add({doc: ""})` raises instead of silently deleting the doc's chunks; empty files in a
+  folder still sync as before.
+- Enrichment: when a chunk's text changes, the graph edges extracted from the old text are
+  removed and the doc's `mentions` edges are rebuilt; a later `add(enrich=...)` re-extracts for
+  chunks that carry no entities even when their text is unchanged.
+
 ## 0.2.0 — 2026-09-14
 
 - New: `MemoryTools` — remember / recall / forget / answer / topics with JSON in and JSON out,

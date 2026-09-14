@@ -115,6 +115,19 @@ def openai_tools() -> list[dict[str, Any]]:
             for t in TOOLS]
 
 
+_SCHEMAS = {t["name"]: t["parameters"] for t in TOOLS}
+
+
+def _k(k: Any) -> int:
+    try:
+        n = int(k)
+    except (TypeError, ValueError):
+        raise ValueError(f"k must be a positive integer, got {k!r}") from None
+    if n < 1:
+        raise ValueError(f"k must be a positive integer, got {k!r}")
+    return n
+
+
 def _hit(h: Any) -> dict[str, Any]:
     d = {"id": h.id, "score": round(float(h.score), 4), "text": h.text, "doc": h.meta.get("doc")}
     if h.meta.get("topic"):
@@ -143,26 +156,33 @@ class MemoryTools:
         text = str(text)
         if not text.strip():
             raise ValueError("nothing to remember: empty text")
-        doc = name or f"note-{hashlib.sha1(text.encode('utf-8')).hexdigest()[:6]}"
-        added = self.lib.topic(topic).add({doc: text})       # dict form: never mistaken for a file path
-        return {"topic": topic, "doc": doc, "chunks": added.chunks,
+        doc = name or f"note-{hashlib.sha1(text.encode('utf-8')).hexdigest()[:12]}"
+        t = self.lib.topic(topic)
+        added = t.add({doc: text})                            # dict form: never mistaken for a file path
+        return {"topic": t.name, "doc": doc, "chunks": added.chunks,
                 "embedded": added.embedded, "unchanged": added.skipped}
 
-    def recall(self, question: str, topic: "str | None" = None, k: int = 4, **ask_kwargs: Any) -> dict[str, Any]:
-        r = self._ask(question, topic, k, **ask_kwargs)
-        return {"question": question, "hits": [self._with_topic(h, topic) for h in r.hits],
+    def recall(self, question: str, topic: "str | None" = None, k: int = 4,
+               min_score: "float | None" = None) -> dict[str, Any]:
+        k = _k(k)
+        t = self._open(topic)
+        extra = {} if min_score is None else {"min_score": float(min_score)}
+        r = t.ask(question, k=k, **extra) if t is not None else self.lib.ask(question, k=k, **extra)
+        return {"question": question, "hits": [self._with_topic(h, t) for h in r.hits],
                 "context": r.context, "ms": round(r.ms, 1)}
 
     def forget(self, topic: str, doc: str) -> dict[str, Any]:
-        self._require(topic)
-        return {"topic": topic, "doc": doc, "removed": self.lib.topic(topic).forget(doc)}
+        t = self._open(topic)
+        return {"topic": t.name, "doc": doc, "removed": t.forget(doc)}
 
     def answer(self, question: str, topic: "str | None" = None, k: int = 4,
-               refuse_below: "float | None" = None, **kwargs: Any) -> dict[str, Any]:
-        target = self.lib.topic(topic) if self._require(topic) else self.lib
+               refuse_below: "float | None" = None) -> dict[str, Any]:
+        k = _k(k)
+        t = self._open(topic)
+        target = t if t is not None else self.lib
         rb = self.refuse_below if refuse_below is None else refuse_below
-        a = target.answer(question, model=self.model, k=k, refuse_below=rb, **kwargs)
-        hits = [self._with_topic(h, topic) for h in a.hits]
+        a = target.answer(question, model=self.model, k=k, refuse_below=rb)
+        hits = [self._with_topic(h, t) for h in a.hits]
         return {"question": question, "answer": str(a), "refused": a.refused, "citations": list(a.citations),
                 "sources": [hits[i - 1] for i in a.citations if 0 < i <= len(hits)], "hits": hits}
 
@@ -171,12 +191,20 @@ class MemoryTools:
 
     # ─── plumbing ─────────────────────────────────────────────────────────
     def dispatch(self, name: str, args: "dict[str, Any] | None" = None) -> dict[str, Any]:
-        """Call a verb by name with a JSON-shaped argument dict. ``KeyError`` for an unknown name."""
+        """Call a verb by name with a JSON-shaped argument dict, checked against ``TOOLS``:
+        ``KeyError`` for an unknown name, ``ValueError`` for unknown or missing arguments."""
         try:
-            fn = self._handlers[name]
+            fn, schema = self._handlers[name], _SCHEMAS[name]
         except KeyError:
             raise KeyError(f"unknown tool {name!r}; known: {sorted(self._handlers)}") from None
-        return fn(**(args or {}))
+        args = dict(args or {})
+        unknown = sorted(set(args) - set(schema["properties"]))
+        if unknown:
+            raise ValueError(f"{name}: unknown argument(s) {unknown}; accepted: {sorted(schema['properties'])}")
+        missing = [r for r in schema.get("required", []) if r not in args]
+        if missing:
+            raise ValueError(f"{name}: missing required argument(s) {missing}")
+        return fn(**args)
 
     def close(self) -> None:
         self.lib.close()
@@ -187,22 +215,22 @@ class MemoryTools:
     def __exit__(self, *args: Any) -> None:
         self.close()
 
-    def _require(self, topic: "str | None") -> bool:
-        """True when a topic was given (and exists); KeyError when given but missing."""
+    def _open(self, topic: "str | None"):
+        """The existing Topic for any spelling of its name (case, spaces, hyphens), or None
+        when no topic was given. KeyError names the known topics when it does not exist."""
         if topic is None:
-            return False
-        if not any(t.name == topic or t.slug == topic for t in self.lib.topics()):
-            raise KeyError(f"no topic {topic!r}; known: {[t.name for t in self.lib.topics()]}")
-        return True
-
-    def _ask(self, question: str, topic: "str | None", k: int, **ask_kwargs: Any):
-        if self._require(topic):
-            return self.lib.topic(topic).ask(question, k=k, **ask_kwargs)
-        return self.lib.ask(question, k=k, **ask_kwargs)
+            return None
+        try:
+            _, archived = self.lib._find(topic)
+        except (KeyError, ValueError):
+            raise KeyError(f"no topic {topic!r}; known: {[t.name for t in self.lib.topics()]}") from None
+        if archived:
+            raise KeyError(f"topic {topic!r} is archived; restore it first")
+        return self.lib.topic(topic)
 
     @staticmethod
-    def _with_topic(h: Any, topic: "str | None") -> dict[str, Any]:
+    def _with_topic(h: Any, t: Any) -> dict[str, Any]:
         d = _hit(h)
-        if topic and "topic" not in d:
-            d["topic"] = topic
+        if t is not None and "topic" not in d:
+            d["topic"] = t.name
         return d

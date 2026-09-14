@@ -196,7 +196,7 @@ def _make_embedder(spec: "str | Embedder", ollama_url: str) -> Embedder:
 
 
 def _slug(name: str) -> str:
-    s = _SLUG.sub("-", name.strip().lower()).strip("-")
+    s = _SLUG.sub("-", name.strip().lower()).strip("-_.")     # no leading "_" or ".": those folders are ours
     if not s:
         raise ValueError("topic name must contain at least one letter or digit")
     return s
@@ -358,16 +358,23 @@ class Topic:
         before = {it.id: it.hash for it in self.memory.store.items if not it.deleted}
         r = self.memory.upsert(items)
         removed = 0
-        for it in list(self.memory.store.items):
+        removed_ids: set[str] = set()
+        for it in list(store.items):
             if not it.deleted and it.meta.get("doc") in new_ids and it.id not in new_ids[it.meta["doc"]]:
                 self.memory.remove(it.id)
                 removed += 1
+                removed_ids.add(it.id)
+        after = {it.id: it for it in store.items if not it.deleted}
+        wanted = [i["id"] for i in items]
+        changed_ids = {cid for cid in wanted if cid in after and before.get(cid) != after[cid].hash}
+        self._prune_graph(changed_ids | removed_ids, after)
         if enrich:
             model = enrich if isinstance(enrich, str) else "llama3.2:3b"
-            after = {it.id: it for it in self.memory.store.items if not it.deleted}
-            changed = [it for cid, it in after.items() if cid in {i["id"] for i in items}
-                       and before.get(cid) != it.hash]
-            self._enrich(model, changed)
+            # changed text, or never enriched (entities were dropped with an earlier edit, or the
+            # store predates enrichment): both need the model; unchanged enriched chunks do not.
+            todo = [after[cid] for cid in wanted
+                    if cid in after and (cid in changed_ids or "entities" not in after[cid].meta)]
+            self._enrich(model, todo)
         self.memory.flush()
         self._auto_links(docs)
         return Added(docs=len(docs), chunks=len(items), embedded=r["added"] + r["updated"],
@@ -384,6 +391,27 @@ class Topic:
             if (self.path / "graph.json").exists() and self.graph.drop(doc):
                 self.graph.save()
         return n
+
+    def _prune_graph(self, stale: "set[str]", live: dict) -> None:
+        """Drop the edges enrichment wrote for chunks that changed or vanished, then rebuild each
+        affected doc's ``mentions`` edges from the entities its surviving chunks still carry."""
+        if not stale or not ((self.path / "graph.json").exists() or self._graph is not None):
+            return
+        store = self.memory.store
+        docs = {store.items[store._id_to_idx[cid]].meta.get("doc") for cid in stale if cid in store._id_to_idx}
+        g = self.graph
+        n = g.drop_sources(stale)
+        for doc in docs:
+            n += g.unlink_all(doc, "mentions")
+        for it in live.values():
+            doc = it.meta.get("doc")
+            if doc in docs:
+                for e in it.meta.get("entities") or []:
+                    if e != doc:
+                        g.link(doc, e, "mentions")
+                        n += 1
+        if n:
+            g.save()
 
     def _auto_links(self, docs: Mapping[str, str]) -> None:
         """``[[Target]]`` in a doc → edge doc → Target when a doc of that name (or stem) exists."""
@@ -407,7 +435,11 @@ class Topic:
 
     def _collect(self, source: Any, name: "str | None") -> dict[str, str]:
         if isinstance(source, Mapping):
-            return {str(k): str(v) for k, v in source.items()}
+            out = {str(k): str(v) for k, v in source.items()}
+            blank = [k for k, v in out.items() if not v.strip()]
+            if blank:            # an empty doc would silently delete its chunks; make the caller say forget()
+                raise ValueError(f"nothing to add for {blank[0]!r}: empty text (use forget() to remove a doc)")
+            return out
         if isinstance(source, (list, tuple, set)):
             out: dict[str, str] = {}
             for s in source:
@@ -430,7 +462,7 @@ class Topic:
         text = str(source)
         if not text.strip():
             raise ValueError("nothing to add: empty text")
-        return {name or f"note-{hashlib.sha1(text.encode('utf-8')).hexdigest()[:6]}": text}
+        return {name or f"note-{hashlib.sha1(text.encode('utf-8')).hexdigest()[:12]}": text}
 
     # ─── ask / answer ─────────────────────────────────────────────────────
     # ─── enrichment ───────────────────────────────────────────────────────

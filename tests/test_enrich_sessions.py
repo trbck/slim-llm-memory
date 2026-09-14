@@ -35,6 +35,10 @@ def fake_extract(model, text, *, url, timeout=600.0):
 fake_extract.calls = []
 
 
+def _sources(t):
+    return [info.get("source") for _, _, d in t.graph.g.edges(data=True) for info in d.get("relations", {}).values()]
+
+
 @pytest.mark.skipif(importlib.util.find_spec("networkx") is None,
                     reason="pip install slim-llm-memory[graph]")
 def test_add_enrich_sets_entities_edges_and_filters(tmp_path: Path, monkeypatch):
@@ -59,6 +63,13 @@ def test_add_enrich_sets_entities_edges_and_filters(tmp_path: Path, monkeypatch)
         assert [h.meta["doc"] for h in t.ask("pool", k=5, min_score=-1.0, entity="postgres")] == ["db.md"]
         t.add({"db.md": "Postgres pool exhausted; switched to pgcat."})             # changed text → stale entities dropped
         assert "Postgres" not in t.entities()
+        # ...and the edges that enrichment wrote for the old text go with them
+        assert t.neighbours("db.md", relation="mentions") == []
+        assert all(src != "db.md#0" for src in _sources(t))
+        # a later enrich must re-extract for a chunk that has no entities, even though its text is unchanged
+        t.add({"db.md": "Postgres pool exhausted; switched to pgcat."}, enrich="m")
+        assert fake_extract.calls == ["m", "m", "m"] and t.entities()["Postgres"] == 1
+        assert ("pgbouncer", "uses", 1.0) in t.neighbours("Postgres")
     with library(tmp_path / "lib", embedder="noop:64", chunk_words=50, overlap=0) as db:
         db.topic("a").add({"db.md": "Postgres pool exhausted; added pgbouncer."}, enrich=True)
         assert fake_extract.calls[-1] == "llama3.2:3b"

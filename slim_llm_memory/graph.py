@@ -78,6 +78,22 @@ class Graph:
             return True
         return False
 
+    def unlink_all(self, node: str, relation: str) -> int:
+        """Remove every outgoing ``relation`` edge of ``node``. Returns how many went."""
+        if node not in self.g:
+            return 0
+        return sum(1 for other in list(self.g[node]) if self.unlink(node, other, relation))
+
+    def drop_sources(self, sources: "set[str]") -> int:
+        """Remove every relation whose ``source`` meta is in ``sources``: the edges enrichment wrote
+        for chunks that have since changed or vanished. Returns how many went."""
+        n = 0
+        for a, b, d in list(self.g.edges(data=True)):
+            for rel, info in list(d.get("relations", {}).items()):
+                if info.get("source") in sources and self.unlink(a, b, rel):
+                    n += 1
+        return n
+
     # ─── read ─────────────────────────────────────────────────────────────
     def neighbours(self, node: str, relation: str | None = None, depth: int = 1,
                    direction: str = "both") -> list[tuple[str, str, float]]:

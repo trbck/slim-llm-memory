@@ -230,3 +230,20 @@ def test_add_with_wikilinks_succeeds_without_graph_extra(tmp_path: Path, monkeyp
         r = t.add({"a.md": "see [[b]] for details"})
         assert r.embedded == 1
         assert t.docs() == ["a.md", "b.md"]
+
+
+def test_blank_text_in_a_mapping_is_an_error_not_a_silent_delete(tmp_path):
+    with topic("blank", path=tmp_path / "blank", embedder="noop:64") as t:
+        t.add({"x": "hello world"})
+        with pytest.raises(ValueError, match="'x'"):
+            t.add({"x": "   "})
+        assert t.docs() == ["x"]                              # nothing was removed
+        with pytest.raises(ValueError):
+            t.add({"y": ""})
+
+
+def test_slug_never_starts_with_underscore_or_dot(tmp_path):
+    from slim_llm_memory.topics import _slug
+    assert _slug("_archive") == "archive" and _slug(".hidden") == "hidden" and _slug("__x__") == "x"
+    with pytest.raises(ValueError):
+        _slug("___")

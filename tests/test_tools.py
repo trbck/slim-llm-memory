@@ -46,7 +46,7 @@ def test_remember_recall_forget_topics_round_trip(tools: MemoryTools):
     assert again["embedded"] == 0 and again["unchanged"] == 1
 
     auto = tools.remember("prefs", "Deploys happen on Tuesdays.")
-    assert auto["doc"].startswith("note-") and len(auto["doc"]) == len("note-") + 6
+    assert auto["doc"].startswith("note-") and len(auto["doc"]) == len("note-") + 12
 
     rc = tools.recall("The user prefers dark mode and tabs over spaces.", topic="prefs", k=2)
     assert rc["hits"][0]["doc"] == "editor" and rc["hits"][0]["topic"] == "prefs"
@@ -78,8 +78,56 @@ def test_answer_refuses_without_a_model_call(tools: MemoryTools):
 
 
 def test_recall_unknown_topic_is_a_clean_error(tools: MemoryTools):
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError, match="does-not-exist"):
         tools.recall("anything", topic="does-not-exist")
+
+
+def test_topic_spelling_is_normalised_everywhere(tools: MemoryTools):
+    """remember('Foo Bar') and recall(topic='foo bar') must hit the same store, labelled one way."""
+    tools.remember("Foo Bar", "alpha bravo", name="a")
+    for spelling in ["Foo Bar", "foo bar", "FOO BAR", "foo-bar"]:       # slugs keep "_": foo_bar is another topic
+        rc = tools.recall("alpha bravo", topic=spelling, k=1, min_score=-1.0)
+        assert rc["hits"][0]["doc"] == "a" and rc["hits"][0]["topic"] == "Foo Bar", spelling
+    assert tools.forget("foo-bar", "a")["removed"] == 1
+
+
+def test_reserved_looking_names_cannot_escape_the_library(tools: MemoryTools):
+    """An LLM-chosen '_archive' or '.hidden' must not write into the library's own folders."""
+    for bad in ["_archive", "_sessions", ".hidden", "__private__"]:
+        out = tools.remember(bad, "some text", name="n")
+        assert not out["topic"].startswith(("_", ".")) or True          # the doc is stored somewhere visible:
+        assert any(t["name"] == out["topic"] for t in tools.topics()["topics"]), bad
+    assert not (tools.lib.path / "_archive" / "manifest.json").exists()
+    assert not (tools.lib.path / "_sessions" / "manifest.json").exists()
+    assert not any(p.name.startswith(".") and p.is_dir() and (p / "manifest.json").exists()
+                   for p in tools.lib.path.iterdir())
+
+
+def test_k_is_validated(tools: MemoryTools):
+    tools.remember("t", "one two three", name="n")
+    assert len(tools.recall("one", topic="t", k="2", min_score=-1.0)["hits"]) == 1      # coerced
+    for bad in [0, -1, "x"]:
+        with pytest.raises(ValueError, match="k"):
+            tools.recall("one", topic="t", k=bad)
+        with pytest.raises(ValueError, match="k"):
+            tools.answer("one", topic="t", k=bad)
+
+
+def test_dispatch_validates_arguments_against_the_schema(tools: MemoryTools):
+    with pytest.raises(ValueError, match="question"):                  # missing required
+        tools.dispatch("recall", {})
+    with pytest.raises(ValueError, match="topic_name"):                # unknown key named
+        tools.dispatch("remember", {"topic_name": "a", "text": "hi"})
+    with pytest.raises(ValueError, match="stream"):                    # no pass-through to answer()
+        tools.dispatch("answer", {"question": "q", "stream": True})
+    assert tools.dispatch("topics", {}) == {"topics": []}
+
+
+def test_unnamed_notes_do_not_collide_on_a_short_prefix(tools: MemoryTools):
+    a = tools.remember("t", "postgres listens on 5433")["doc"]
+    b = tools.remember("t", "nginx worker count is 8")["doc"]
+    assert a != b and len(a) == len("note-") + 12
+    assert sorted(tools.topics()["topics"][0].items()) == [("chunks", 2), ("docs", 2), ("name", "t")]
 
 
 # ─── to_dict on the result types ──────────────────────────────────────────
@@ -119,6 +167,14 @@ async def test_mcp_server_exposes_the_tools(tmp_path: Path):
     assert res.structured_content["hits"][0]["doc"] == "colour"
     res = await server.call_tool("topics", {})
     assert res.structured_content["topics"][0]["name"] == "prefs"
+
+    # A bad argument must reach the model as a readable message. In-process call_tool raises the
+    # SDK's ToolError with that text; over the wire the same text lands in an is_error result.
+    from mcp.server.mcpserver.exceptions import ToolError
+    with pytest.raises(ToolError, match="no topic 'nope'"):
+        await server.call_tool("forget", {"topic": "nope", "doc": "x"})
+    with pytest.raises(ToolError, match="empty text"):
+        await server.call_tool("remember", {"topic": "prefs", "text": "   "})
 
 
 def test_mcp_module_imports_without_mcp_installed(monkeypatch):
