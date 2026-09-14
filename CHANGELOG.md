@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Fix: re-adding an unchanged document (re-indexing a folder, say) dropped the entities that
+  `add(enrich=...)` had extracted for its chunks, because the meta-only update replaced the
+  metadata wholesale. Entities now survive as long as the chunk text is unchanged.
+- Docs: five use-case notebooks (`notebooks/1*_usecase_*.ipynb`): codebase Q&A, support ticket
+  triage, agent memory across restarts, a judged semantic cache, notes housekeeping.
+
 ## 0.1.1 — 2026-09-13
 
 - Fix: `Topic.add()` raised `ImportError` on a plain install (no `[graph]` extra) when a

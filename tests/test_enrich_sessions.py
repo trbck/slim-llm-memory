@@ -53,6 +53,12 @@ def test_add_enrich_sets_entities_edges_and_filters(tmp_path: Path, monkeypatch)
         assert t.ask("pool", k=5, min_score=-1.0, entity="nothing") .hits == []
         t.add({"db.md": "Postgres pool exhausted; added pgbouncer."}, enrich="m")   # unchanged → no model call
         assert fake_extract.calls == ["m", "m"]
+        assert t.entities()["Postgres"] == 1                                        # ...and entities survive
+        t.add({"db.md": "Postgres pool exhausted; added pgbouncer."})               # plain re-index, no enrich
+        assert t.entities()["Postgres"] == 1
+        assert [h.meta["doc"] for h in t.ask("pool", k=5, min_score=-1.0, entity="postgres")] == ["db.md"]
+        t.add({"db.md": "Postgres pool exhausted; switched to pgcat."})             # changed text → stale entities dropped
+        assert "Postgres" not in t.entities()
     with library(tmp_path / "lib", embedder="noop:64", chunk_words=50, overlap=0) as db:
         db.topic("a").add({"db.md": "Postgres pool exhausted; added pgbouncer."}, enrich=True)
         assert fake_extract.calls[-1] == "llama3.2:3b"

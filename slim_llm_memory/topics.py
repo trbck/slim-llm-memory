@@ -27,7 +27,7 @@ import numpy as np
 
 from .chunking import chunk_text
 from .embed import Embedder
-from .index import Hit, Memory, _normalise
+from .index import Hit, Memory, _content_hash, _normalise
 from .enrich import extract as _extract
 from .graph import Graph, wikilinks
 from .keyword import BM25, rrf
@@ -325,6 +325,7 @@ class Topic:
         chunk to extract entities and relations into ``meta["entities"]`` and the graph.
         """
         docs = self._collect(source, name)
+        store = self.memory.store
         items: list[dict[str, Any]] = []
         new_ids: dict[str, set[str]] = {}
         for doc, text in docs.items():
@@ -335,6 +336,12 @@ class Topic:
                 meta: dict[str, Any] = {"kind": "doc", "doc": doc, "idx": c.idx}
                 if c.heading:
                     meta["heading"] = c.heading
+                # Re-indexing an unchanged chunk must not throw away what enrich() extracted
+                # for it: upsert replaces meta wholesale, so carry the entities over here.
+                prev = store.items[store._id_to_idx[cid]] if cid in store._id_to_idx else None
+                if prev is not None and not prev.deleted and prev.meta.get("entities") \
+                        and prev.hash == _content_hash(c.text):
+                    meta["entities"] = prev.meta["entities"]
                 items.append({"id": cid, "text": c.text, "meta": meta})
             new_ids[doc] = ids
         before = {it.id: it.hash for it in self.memory.store.items if not it.deleted}

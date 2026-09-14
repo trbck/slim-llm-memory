@@ -169,6 +169,16 @@ Start with the four hello notebooks. Each is about ten lines and needs Ollama ru
 | [02_hello_memory](https://github.com/trbck/slim-llm-memory/blob/main/notebooks/02_hello_memory.ipynb) | the low-level `Memory` API |
 | [03_hello_answer](https://github.com/trbck/slim-llm-memory/blob/main/notebooks/03_hello_answer.ipynb) | a cited answer, and refusal |
 
+Then the five use-case notebooks. Each builds one small application end to end and measures it.
+
+| Notebook | Use case |
+|---|---|
+| [10_usecase_codebase_qa](https://github.com/trbck/slim-llm-memory/blob/main/notebooks/10_usecase_codebase_qa.ipynb) | ask a repo questions; dense vs keyword vs hybrid on identifiers, cited answer |
+| [11_usecase_ticket_triage](https://github.com/trbck/slim-llm-memory/blob/main/notebooks/11_usecase_ticket_triage.ipynb) | route support tickets to an area, draft a reply, escalate with `refuse_below` |
+| [12_usecase_agent_memory](https://github.com/trbck/slim-llm-memory/blob/main/notebooks/12_usecase_agent_memory.ipynb) | an agent that recalls facts and earlier turns, and survives a restart |
+| [13_usecase_semantic_cache](https://github.com/trbck/slim-llm-memory/blob/main/notebooks/13_usecase_semantic_cache.ipynb) | cache expensive calls by meaning; choose the threshold from measured scores |
+| [14_usecase_notes_housekeeping](https://github.com/trbck/slim-llm-memory/blob/main/notebooks/14_usecase_notes_housekeeping.ipynb) | re-index a notes folder cheaply, find duplicates, `related()` over `[[wikilinks]]`, `forget()` |
+
 The longer notebooks in [notebooks/](https://github.com/trbck/slim-llm-memory/tree/main/notebooks)
 measure things. `use_cases_demo` tests cited answers, paraphrased questions, other
 languages and chat memory, and ends with a list of what is missing compared with a full
