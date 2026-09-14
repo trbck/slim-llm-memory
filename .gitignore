@@ -27,3 +27,6 @@ htmlcov/
 HANDOFF.md
 PORTFOLIO.md
 .usecase_nb/
+.superpowers/
+docs/superpowers/
+docs/specs/
